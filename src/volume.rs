@@ -464,7 +464,7 @@ mod tests {
         for x in 0..32 {
             for y in 0..32 {
                 for z in 0..32 {
-                    let idx_vector = na::Vector3::new(x, y, z);
+                    let idx_vector = na::vector![x, y, z];
 
                     assert_eq!(volume[idx_vector], 42)
                 }
@@ -556,8 +556,8 @@ mod tests {
         let mut vol1: Volume<i32, 16, 10, 16> = Default::default();
         let mut vol2: Volume<i32, 16, 24, 16> = Default::default();
 
-        let vol1_anomaly = na::Vector3::new(6, 6, 6usize);
-        let vol2_anomaly = na::Vector3::new(9, 21, 10usize);
+        let vol1_anomaly = na::vector![6, 6, 6usize];
+        let vol2_anomaly = na::vector![9, 21, 10usize];
 
         vol1[vol1_anomaly] = 42;
         vol2[vol2_anomaly] = 64;
@@ -565,7 +565,7 @@ mod tests {
         let stitched_volume: Volume<i32, 16, 34, 16> = stitch(&vol1, &vol2, Axis::Y);
 
         assert_eq!(stitched_volume[vol1_anomaly], 42);
-        assert_eq!(stitched_volume[na::Vector3::new(0, 10, 0usize) + vol2_anomaly], 64);
+        assert_eq!(stitched_volume[na::vector![0, 10, 0usize] + vol2_anomaly], 64);
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod tests {
         let mut vol2: Volume<i32, 16, 24, 16> = Default::default();
         let mut vol3: Volume<i32, 16, 24, 16> = Default::default();
 
-        let anomaly = na::Vector3::new(9, 21, 10usize);
+        let anomaly = na::vector![9, 21, 10usize];
 
         vol1[anomaly] = 42;
         vol2[anomaly] = 64;
@@ -615,7 +615,7 @@ mod tests {
         vol2[anomaly] = 42;
 
         assert!(vol1 == vol2);
-        assert!(vol1 == vol3);
         assert!(vol2 == vol3);
+        assert!(vol1 == vol3);
     }
 }
