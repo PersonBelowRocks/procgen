@@ -14,6 +14,12 @@ trait VolumeDimensions {
     const Z_SIZE: usize;
 }
 
+pub enum Axis {
+    X,
+    Y,
+    Z
+}
+
 /// 3D cubic volume. Dimensions of all axes are the same (i.e., a cube).
 type CubicVolume<T, const SIZE: usize> = Volume<T, SIZE, SIZE, SIZE>;
 
@@ -280,6 +286,8 @@ mod iters {
 pub use impls::*;
 mod impls {
 
+    use num_traits::{PrimInt, NumCast};
+
     use super::*;
 
     impl<
@@ -307,7 +315,115 @@ mod impls {
         pub fn iter_indices(&self) -> VolumeIdxIterator<X_SIZE, Y_SIZE, Z_SIZE> {
             Default::default()
         }
+
+        pub const fn capacity() -> usize {
+            X_SIZE * Y_SIZE * Z_SIZE
+        }
+
+        pub fn within_bounds<N: PrimInt>(idx: na::Vector3<N>) -> bool {
+            let x = <usize as NumCast>::from(idx[0]).unwrap();
+            let y = <usize as NumCast>::from(idx[1]).unwrap();
+            let z = <usize as NumCast>::from(idx[2]).unwrap();
+
+            let no_undershot = 0 < x && 0 < y && 0 < z;
+            let no_overshot = x < X_SIZE && y < Y_SIZE && z < Z_SIZE;
+
+            no_undershot && no_overshot
+        }
+
+        pub fn get<N: PrimInt>(&self, idx: na::Vector3<N>) -> Option<&T> {
+            if Self::within_bounds(idx) {
+                Some(&self[idx])
+            } else {
+                None
+            }
+        }
+
+        pub fn get_mut<N: PrimInt>(&mut self, idx: na::Vector3<N>) -> Option<&mut T> {
+            if Self::within_bounds(idx) {
+                Some(&mut self[idx])
+            } else {
+                None
+            }
+        }
     }
+
+    pub fn stitch<
+            T: Sized + Copy,
+
+            const LHS_X_SIZE: usize,
+            const LHS_Y_SIZE: usize,
+            const LHS_Z_SIZE: usize,
+
+            const RHS_X_SIZE: usize, 
+            const RHS_Y_SIZE: usize, 
+            const RHS_Z_SIZE: usize,
+
+            const RESULT_X_SIZE: usize,
+            const RESULT_Y_SIZE: usize,
+            const RESULT_Z_SIZE: usize
+        >(
+            lhs: &Volume<T, LHS_X_SIZE, LHS_Y_SIZE, LHS_Z_SIZE>, 
+            rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>, 
+            axis: Axis) -> Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE> {
+            match axis {
+                Axis::X => {
+                    assert_eq!(LHS_Y_SIZE, RHS_Y_SIZE);
+                    assert_eq!(LHS_Z_SIZE, RHS_Z_SIZE);
+                    
+                    // Initialize a volume with a dummy value (point 0, 0, 0 of the LHS volume). We immediatelly fill this volume in with actual values, but Rust requires all arrays to be initialized (in safe code).
+                    // The compiler will hopefully optimize the redundant copies away here, the alternative would be to use an unsafe block to make an array of uninitialized memory but that's not very good practice.
+                    let mut out: Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE> = Volume::new_filled(lhs[[0, 0, 0usize]]);
+                    
+                    // The left hand side is going to be at the smallest X, and the right hand side is going to be at the furthest X.
+                    for idx in lhs.iter_indices() {
+                        out[idx] = lhs[idx];
+                    }
+
+                    // For the right hand side we just need to add the X size of the left hand side.
+                    for raw_idx in rhs.iter_indices() {
+                        let idx: na::Vector3<_> = [raw_idx[0] + LHS_X_SIZE, raw_idx[1], raw_idx[2]].into();
+                        out[idx] = rhs[raw_idx];
+                    }
+
+                    out
+                },
+                Axis::Y => {
+                    assert_eq!(LHS_X_SIZE, RHS_X_SIZE);
+                    assert_eq!(LHS_Z_SIZE, RHS_Z_SIZE);
+                    
+                    let mut out: Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE> = Volume::new_filled(lhs[[0, 0, 0usize]]);
+                    
+                    for idx in lhs.iter_indices() {
+                        out[idx] = lhs[idx];
+                    }
+
+                    for raw_idx in rhs.iter_indices() {
+                        let idx: na::Vector3<_> = [raw_idx[0], raw_idx[1] + LHS_Y_SIZE, raw_idx[2]].into();
+                        out[idx] = rhs[raw_idx];
+                    }
+
+                    out
+                },
+                Axis::Z => {
+                    assert_eq!(LHS_X_SIZE, RHS_X_SIZE);
+                    assert_eq!(LHS_Y_SIZE, RHS_Y_SIZE);
+                    
+                    let mut out: Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE> = Volume::new_filled(lhs[[0, 0, 0usize]]);
+                    
+                    for idx in lhs.iter_indices() {
+                        out[idx] = lhs[idx];
+                    }
+
+                    for raw_idx in rhs.iter_indices() {
+                        let idx: na::Vector3<_> = [raw_idx[0], raw_idx[1], raw_idx[2] + LHS_Z_SIZE].into();
+                        out[idx] = rhs[raw_idx];
+                    }
+
+                    out
+                },
+            }
+        }
 }
 
 #[cfg(test)]
@@ -339,9 +455,16 @@ mod tests {
 
     #[test]
     fn indexing() {
+        let volume: Volume<i32, 32, 32, 32> = Volume::new_filled(42);
+        let idx = na::vector![10, 5, 22];
+
+        assert_eq!(volume[idx], 42);
+    }
+
+    #[test]
+    fn mutable_indexing() {
         let mut volume: Volume<i32, 32, 32, 32> = Volume::new_filled(42);
-        
-        let idx = na::Vector3::new(10, 5, 22);
+        let idx = na::vector![10, 5, 22];
 
         assert_eq!(volume[idx], 42);
 
@@ -406,5 +529,50 @@ mod tests {
 
         assert_eq!(count, lower);
         assert_eq!(Some(count), upper);
+    }
+
+    #[test]
+    fn stitching() {
+        let mut vol1: Volume<i32, 16, 10, 16> = Default::default();
+        let mut vol2: Volume<i32, 16, 24, 16> = Default::default();
+
+        let vol1_anomaly = na::Vector3::new(6, 6, 6usize);
+        let vol2_anomaly = na::Vector3::new(9, 21, 10usize);
+
+        vol1[vol1_anomaly] = 42;
+        vol2[vol2_anomaly] = 64;
+
+        let stitched_volume: Volume<i32, 16, 34, 16> = stitch(&vol1, &vol2, Axis::Y);
+
+        assert_eq!(stitched_volume[vol1_anomaly], 42);
+        assert_eq!(stitched_volume[na::Vector3::new(0, 10, 0usize) + vol2_anomaly], 64);
+    }
+
+    #[test]
+    fn fallible_indexing() {
+        let volume: Volume<i32, 10, 10, 10> = Default::default();
+
+        let valid_idx = na::vector![7, 7, 7];
+        let invalid_idx = na::vector![16, 7, 7];
+
+        assert_eq!(volume.get(valid_idx), Some(&i32::default()));
+        assert_eq!(volume.get(invalid_idx), None);
+    }
+
+    #[test]
+    fn mutable_fallible_indexing() {
+        let mut volume: Volume<i32, 10, 10, 10> = Default::default();
+
+        let valid_idx = na::vector![7, 7, 7];
+        let invalid_idx = na::vector![16, 7, 7];
+
+        assert_eq!(volume.get_mut(valid_idx), Some(&mut i32::default()));
+        assert_eq!(volume.get_mut(invalid_idx), None);
+
+        // Try to mutate here
+        let slot = volume.get_mut(valid_idx).unwrap();
+        *slot = 42;
+
+        assert_eq!(volume.get(valid_idx), Some(&42))
     }
 }
