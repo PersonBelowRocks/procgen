@@ -67,6 +67,26 @@ mod trait_impls {
 
     use num_traits::{PrimInt, NumCast};
     use std::ops::{Index, IndexMut};
+    use std::cmp::{Eq, PartialEq};
+
+    impl<T, const X_SIZE: usize, const Y_SIZE: usize, const Z_SIZE: usize> PartialEq for Volume<T, X_SIZE, Y_SIZE, Z_SIZE>
+    where
+        T: Sized + PartialEq 
+    {
+        fn eq(&self, rhs: &Self) -> bool {
+            for idx in self.iter_indices() {
+                if self[idx] != rhs[idx] {
+                    return false
+                }
+            }
+            true
+        }
+    }
+
+    impl<T, const X_SIZE: usize, const Y_SIZE: usize, const Z_SIZE: usize> Eq for Volume<T, X_SIZE, Y_SIZE, Z_SIZE>
+    where T: Sized + PartialEq {
+        // Default implementation does everything we need.
+    }
 
     impl<
         N: PrimInt, 
@@ -574,5 +594,28 @@ mod tests {
         *slot = 42;
 
         assert_eq!(volume.get(valid_idx), Some(&42))
+    }
+
+    #[test]
+    fn equality() {
+        let mut vol1: Volume<i32, 16, 24, 16> = Default::default();
+        let mut vol2: Volume<i32, 16, 24, 16> = Default::default();
+        let mut vol3: Volume<i32, 16, 24, 16> = Default::default();
+
+        let anomaly = na::Vector3::new(9, 21, 10usize);
+
+        vol1[anomaly] = 42;
+        vol2[anomaly] = 64;
+        vol3[anomaly] = 42;
+
+        assert!(vol1 != vol2);
+        assert!(vol2 != vol3);
+        assert!(vol1 == vol3);
+
+        vol2[anomaly] = 42;
+
+        assert!(vol1 == vol2);
+        assert!(vol1 == vol3);
+        assert!(vol2 == vol3);
     }
 }
