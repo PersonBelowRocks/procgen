@@ -2,6 +2,7 @@
 
 use super::*;
 use num_traits::{PrimInt, NumCast};
+use anyhow::Result;
 
 /// 3D volume. Sort of a glorified 3D array with methods to index & access elements, stitch multiple volumes together, etc.
 pub struct Volume<
@@ -33,6 +34,45 @@ impl<
     /// Make new volume by cloning `value` into an array.
     pub fn new_filled(value: T) -> Self {
         Self([[[value; Z_SIZE]; Y_SIZE]; X_SIZE])
+    }
+
+    #[inline]
+    pub fn stitch_x<
+        const RHS_X_SIZE: usize, 
+        const RHS_Y_SIZE: usize, 
+        const RHS_Z_SIZE: usize,
+        
+        const RESULT_X_SIZE: usize,
+        const RESULT_Y_SIZE: usize,
+        const RESULT_Z_SIZE: usize
+    >(&self, rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
+        stitch(self, rhs, Axis::X)
+    }
+
+    #[inline]
+    pub fn stitch_y<
+        const RHS_X_SIZE: usize, 
+        const RHS_Y_SIZE: usize, 
+        const RHS_Z_SIZE: usize,
+        
+        const RESULT_X_SIZE: usize,
+        const RESULT_Y_SIZE: usize,
+        const RESULT_Z_SIZE: usize
+    >(&self, rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
+        stitch(self, rhs, Axis::Y)
+    }
+
+    #[inline]
+    pub fn stitch_z<
+        const RHS_X_SIZE: usize, 
+        const RHS_Y_SIZE: usize, 
+        const RHS_Z_SIZE: usize,
+        
+        const RESULT_X_SIZE: usize,
+        const RESULT_Y_SIZE: usize,
+        const RESULT_Z_SIZE: usize
+    >(&self, rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
+        stitch(self, rhs, Axis::Z)
     }
 }
 
