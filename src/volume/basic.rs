@@ -11,6 +11,7 @@ pub struct Volume<
         const Z_SIZE: usize
     >(pub(super) VolumeStorage<T, X_SIZE, Y_SIZE, Z_SIZE>);
 
+#[derive(Debug)]
 pub enum Axis {
     X,
     Y,
@@ -89,4 +90,9 @@ impl<
         }
     }
 
+    /// Get a vector of this volume's dimensions (i.e., [X_SIZE, Y_SIZE, Z_SIZE]).
+    #[inline]
+    pub fn dimensions(&self) -> na::Vector3<usize> {
+        na::vector![X_SIZE, Y_SIZE, Z_SIZE]
+    }
 }

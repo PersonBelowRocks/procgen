@@ -1,5 +1,22 @@
 use super::*;
 
+pub trait VolumeDimensions {
+    const X_SIZE: usize;
+    const Y_SIZE: usize;
+    const Z_SIZE: usize;
+}
+
+impl<
+    T: Sized,
+    const X_SIZE: usize,
+    const Y_SIZE: usize,
+    const Z_SIZE: usize,
+> VolumeDimensions for Volume<T, X_SIZE, Y_SIZE, Z_SIZE> {
+    const X_SIZE: usize = X_SIZE;
+    const Y_SIZE: usize = Y_SIZE;
+    const Z_SIZE: usize = Z_SIZE;
+}
+
 impl<
     T: Sized, 
     const X_SIZE: usize, 

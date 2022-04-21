@@ -1,4 +1,26 @@
 use super::{Volume, Axis};
+use anyhow::Result;
+
+#[allow(dead_code)]
+#[derive(thiserror::Error, Debug)]
+pub enum StitchError {
+    InvalidResultDimensions(na::Vector3<usize>, na::Vector3<usize>, na::Vector3<usize>, Axis),
+    IncompatibleDimensions(na::Vector3<usize>, na::Vector3<usize>, Axis),
+}
+
+use std::fmt;
+impl fmt::Display for StitchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidResultDimensions(dim_a, dim_b, dim_result, axis) => {
+                write!(f, "Merging volumes of dimensions {dim_a} and {dim_b} along axis '{axis:?}' does not result in a volume of dimensions {dim_result}")
+            },
+            Self::IncompatibleDimensions(dim_a, dim_b, axis) => {
+                write!(f, "Volumes of dimensions {dim_a} and {dim_b} cannot be merged along axis '{axis:?}'")
+            }
+        }
+    }
+}
 
 /// Stitch 2 volumes together along an axis.
 /// 
@@ -54,18 +76,21 @@ pub fn stitch<
         >(
             lhs: &Volume<T, LHS_X_SIZE, LHS_Y_SIZE, LHS_Z_SIZE>, 
             rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>, 
-            axis: Axis) -> Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE> {
+            axis: Axis) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
             
             let required_capacity = RESULT_X_SIZE * RESULT_Y_SIZE * RESULT_Z_SIZE;
 
             match axis {
                 Axis::X => {
 
-                    assert_eq!(LHS_Y_SIZE, RHS_Y_SIZE);
-                    assert_eq!(LHS_Z_SIZE, RHS_Z_SIZE);
+                    if LHS_Y_SIZE != RHS_Y_SIZE || LHS_Z_SIZE != RHS_Z_SIZE {
+                        return Err(StitchError::IncompatibleDimensions(lhs.dimensions(), rhs.dimensions(), axis).into())
+                    }
 
                     let actual_capacity = (LHS_X_SIZE + RHS_X_SIZE) * LHS_Y_SIZE * LHS_Z_SIZE;
-                    assert_eq!(required_capacity, actual_capacity);
+                    if required_capacity != actual_capacity {
+                        return Err(StitchError::InvalidResultDimensions(lhs.dimensions(), rhs.dimensions(), na::vector![RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE], axis).into())
+                    }
                     
                     // Initialize a volume with a dummy value (point 0, 0, 0 of the LHS volume). We immediatelly fill this volume in with actual values, but Rust requires all arrays to be initialized (in safe code).
                     // The compiler will hopefully optimize the redundant copies away here, the alternative would be to use an unsafe block to make an array of uninitialized memory but that's not very good practice.
@@ -82,15 +107,18 @@ pub fn stitch<
                         out[idx] = rhs[raw_idx];
                     }
 
-                    out
+                    Ok(out)
                 },
                 Axis::Y => {
 
-                    assert_eq!(LHS_X_SIZE, RHS_X_SIZE);
-                    assert_eq!(LHS_Z_SIZE, RHS_Z_SIZE);
+                    if LHS_X_SIZE != RHS_X_SIZE || LHS_Z_SIZE != RHS_Z_SIZE {
+                        return Err(StitchError::IncompatibleDimensions(lhs.dimensions(), rhs.dimensions(), axis).into())
+                    }
 
                     let actual_capacity = LHS_X_SIZE * (LHS_Y_SIZE + RHS_Y_SIZE) * LHS_Z_SIZE;
-                    assert_eq!(required_capacity, actual_capacity);
+                    if required_capacity != actual_capacity {
+                        return Err(StitchError::InvalidResultDimensions(lhs.dimensions(), rhs.dimensions(), na::vector![RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE], axis).into())
+                    }
                     
                     let mut out: Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE> = Volume::new_filled(lhs[[0, 0, 0usize]]);
                     
@@ -103,15 +131,17 @@ pub fn stitch<
                         out[idx] = rhs[raw_idx];
                     }
 
-                    out
+                    Ok(out)
                 },
                 Axis::Z => {
-
-                    assert_eq!(LHS_X_SIZE, RHS_X_SIZE);
-                    assert_eq!(LHS_Y_SIZE, RHS_Y_SIZE);
+                    if LHS_X_SIZE != RHS_X_SIZE || LHS_Y_SIZE != RHS_Y_SIZE {
+                        return Err(StitchError::IncompatibleDimensions(lhs.dimensions(), rhs.dimensions(), axis).into())
+                    }
 
                     let actual_capacity = LHS_X_SIZE * LHS_Y_SIZE * (LHS_Z_SIZE + RHS_Z_SIZE);
-                    assert_eq!(required_capacity, actual_capacity);
+                    if required_capacity != actual_capacity {
+                        return Err(StitchError::InvalidResultDimensions(lhs.dimensions(), rhs.dimensions(), na::vector![RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE], axis).into())
+                    }
                     
                     let mut out: Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE> = Volume::new_filled(lhs[[0, 0, 0usize]]);
                     
@@ -124,7 +154,7 @@ pub fn stitch<
                         out[idx] = rhs[raw_idx];
                     }
 
-                    out
+                    Ok(out)
                 },
             }
         }

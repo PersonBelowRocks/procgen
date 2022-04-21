@@ -10,6 +10,8 @@ use basic::VolumeStorage;
 
 #[cfg(test)]
 mod tests {
+    use crate::volume::stitching::StitchError;
+
     use super::*;
 
     #[test]
@@ -124,10 +126,33 @@ mod tests {
         vol1[vol1_anomaly] = 42;
         vol2[vol2_anomaly] = 64;
 
-        let stitched_volume: Volume<i32, 16, 34, 16> = stitch(&vol1, &vol2, Axis::Y);
+        let stitched_volume: Volume<i32, 16, 34, 16> = stitch(&vol1, &vol2, Axis::Y).unwrap();
 
         assert_eq!(stitched_volume[vol1_anomaly], 42);
         assert_eq!(stitched_volume[na::vector![0, 10, 0usize] + vol2_anomaly], 64);
+    }
+
+    #[test]
+    fn fallible_stitching() {
+        use anyhow::Result;
+
+        let vol1: Volume<i32, 16, 10, 16> = Default::default();
+        let vol2: Volume<i32, 16, 16, 24> = Default::default();
+
+        let stitched_volume: Result<Volume<i32, 16, 34, 16>> = stitch(&vol1, &vol2, Axis::Y);
+
+        if stitched_volume.is_ok() {
+            panic!()
+        }
+
+        let vol1: Volume<i32, 16, 10, 16> = Default::default();
+        let vol2: Volume<i32, 16, 24, 16> = Default::default();
+
+        let stitched_volume: Result<Volume<i32, 16, 80, 16>> = stitch(&vol1, &vol2, Axis::Y);
+
+        if stitched_volume.is_ok() {
+            panic!()
+        }
     }
 
     #[test]
