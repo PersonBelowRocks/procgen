@@ -5,6 +5,7 @@ use num_traits::{PrimInt, NumCast};
 use anyhow::Result;
 
 /// 3D volume. Sort of a glorified 3D array with methods to index & access elements, stitch multiple volumes together, etc.
+#[derive(Clone)]
 pub struct Volume<
         T: Sized, 
         const X_SIZE: usize, 
