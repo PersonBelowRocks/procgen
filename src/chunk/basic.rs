@@ -1,4 +1,4 @@
-use crate::{volume::CubicVolume, block::BlockId};
+use crate::{block::BlockId, volume::CubicVolume};
 
 pub const CHUNK_SECTION_SIZE: usize = 16;
 
@@ -8,22 +8,19 @@ type IVec2 = na::Vector2<i32>;
 
 pub struct Chunk {
     pub(super) pos: IVec2,
-    pub(super) sections: Vec<Option<Box<ChunkSection>>>
+    pub(super) sections: Vec<Option<Box<ChunkSection>>>,
 }
 
 impl Chunk {
     pub fn try_new(pos: IVec2, height: u32) -> Option<Self> {
         if (height as usize) < CHUNK_SECTION_SIZE {
-            return None
+            return None;
         }
 
         let mut sections = Vec::with_capacity(height as usize / CHUNK_SECTION_SIZE);
         sections.fill(None);
 
-        Some(Self {
-            pos,
-            sections
-        })
+        Some(Self { pos, sections })
     }
 
     pub fn pos(&self) -> IVec2 {

@@ -1,37 +1,32 @@
 // TODO: reduce type complexity a lil so we can avoid typing X_SIZE, Y_SIZE, Z_SIZE in every impl block...
 
 use super::*;
-use num_traits::{PrimInt, NumCast};
 use anyhow::Result;
+use num_traits::{NumCast, PrimInt};
 
 /// 3D volume. Sort of a glorified 3D array with methods to index & access elements, stitch multiple volumes together, etc.
 #[derive(Clone)]
-pub struct Volume<
-        T: Sized, 
-        const X_SIZE: usize, 
-        const Y_SIZE: usize, 
-        const Z_SIZE: usize
-    >(pub(super) VolumeStorage<T, X_SIZE, Y_SIZE, Z_SIZE>);
+pub struct Volume<T: Sized, const X_SIZE: usize, const Y_SIZE: usize, const Z_SIZE: usize>(
+    pub(super) VolumeStorage<T, X_SIZE, Y_SIZE, Z_SIZE>,
+);
 
 #[derive(Debug)]
 pub enum Axis {
     X,
     Y,
-    Z
+    Z,
 }
 
 /// 3D cubic volume. Dimensions of all axes are the same (i.e., a cube).
 pub type CubicVolume<T, const SIZE: usize> = Volume<T, SIZE, SIZE, SIZE>;
 
 /// Internal storage type for volumes. Alias for a 3D array.
-pub(super) type VolumeStorage<T, const X_SIZE: usize, const Y_SIZE: usize, const Z_SIZE: usize> = [[[T; Z_SIZE]; Y_SIZE]; X_SIZE];
+pub(super) type VolumeStorage<T, const X_SIZE: usize, const Y_SIZE: usize, const Z_SIZE: usize> =
+    [[[T; Z_SIZE]; Y_SIZE]; X_SIZE];
 
-impl<
-    T: Sized + Copy, 
-    const X_SIZE: usize, 
-    const Y_SIZE: usize, 
-    const Z_SIZE: usize
-> Volume<T, X_SIZE, Y_SIZE, Z_SIZE> {
+impl<T: Sized + Copy, const X_SIZE: usize, const Y_SIZE: usize, const Z_SIZE: usize>
+    Volume<T, X_SIZE, Y_SIZE, Z_SIZE>
+{
     /// Make new volume by cloning `value` into an array.
     pub fn new_filled(value: T) -> Self {
         Self([[[value; Z_SIZE]; Y_SIZE]; X_SIZE])
@@ -39,51 +34,53 @@ impl<
 
     #[inline]
     pub fn stitch_x<
-        const RHS_X_SIZE: usize, 
-        const RHS_Y_SIZE: usize, 
+        const RHS_X_SIZE: usize,
+        const RHS_Y_SIZE: usize,
         const RHS_Z_SIZE: usize,
-        
         const RESULT_X_SIZE: usize,
         const RESULT_Y_SIZE: usize,
-        const RESULT_Z_SIZE: usize
-    >(&self, rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
+        const RESULT_Z_SIZE: usize,
+    >(
+        &self,
+        rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>,
+    ) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
         stitch(self, rhs, Axis::X)
     }
 
     #[inline]
     pub fn stitch_y<
-        const RHS_X_SIZE: usize, 
-        const RHS_Y_SIZE: usize, 
+        const RHS_X_SIZE: usize,
+        const RHS_Y_SIZE: usize,
         const RHS_Z_SIZE: usize,
-        
         const RESULT_X_SIZE: usize,
         const RESULT_Y_SIZE: usize,
-        const RESULT_Z_SIZE: usize
-    >(&self, rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
+        const RESULT_Z_SIZE: usize,
+    >(
+        &self,
+        rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>,
+    ) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
         stitch(self, rhs, Axis::Y)
     }
 
     #[inline]
     pub fn stitch_z<
-        const RHS_X_SIZE: usize, 
-        const RHS_Y_SIZE: usize, 
+        const RHS_X_SIZE: usize,
+        const RHS_Y_SIZE: usize,
         const RHS_Z_SIZE: usize,
-        
         const RESULT_X_SIZE: usize,
         const RESULT_Y_SIZE: usize,
-        const RESULT_Z_SIZE: usize
-    >(&self, rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
+        const RESULT_Z_SIZE: usize,
+    >(
+        &self,
+        rhs: &Volume<T, RHS_X_SIZE, RHS_Y_SIZE, RHS_Z_SIZE>,
+    ) -> Result<Volume<T, RESULT_X_SIZE, RESULT_Y_SIZE, RESULT_Z_SIZE>> {
         stitch(self, rhs, Axis::Z)
     }
 }
 
-impl<
-    T: Sized, 
-    const X_SIZE: usize, 
-    const Y_SIZE: usize, 
-    const Z_SIZE: usize
-> Volume<T, X_SIZE, Y_SIZE, Z_SIZE> {
-
+impl<T: Sized, const X_SIZE: usize, const Y_SIZE: usize, const Z_SIZE: usize>
+    Volume<T, X_SIZE, Y_SIZE, Z_SIZE>
+{
     pub fn iter(&self) -> VolumeIterator<'_, T, X_SIZE, Y_SIZE, Z_SIZE> {
         VolumeIterator::new(self)
     }

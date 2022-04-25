@@ -17,7 +17,7 @@ pub type ChunkAccessResult<T> = Result<T, ChunkAccessError>;
 impl Chunk {
     pub fn get<N: PrimInt>(&self, v: na::Vector3<N>) -> ChunkAccessResult<&BlockId> {
         // let [x, y, z] = cast_vec3::<u32, N>(v).into().unwrap();
-        
+
         todo!()
     }
 

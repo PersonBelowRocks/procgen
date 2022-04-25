@@ -1,12 +1,12 @@
 mod basic;
+mod iters;
 mod stitching;
 mod trait_impls;
-mod iters;
 
-pub use basic::{Volume, CubicVolume, Axis};
+use basic::VolumeStorage;
+pub use basic::{Axis, CubicVolume, Volume};
 pub use iters::{VolumeIdxIterator, VolumeIterator};
 pub use stitching::stitch;
-use basic::VolumeStorage;
 
 #[cfg(test)]
 mod tests {
@@ -34,7 +34,6 @@ mod tests {
                 }
             }
         }
-        
     }
 
     #[test]
@@ -89,7 +88,7 @@ mod tests {
 
         let iterator = volume.iter();
         let (lower, upper) = iterator.size_hint();
-        
+
         let mut count: usize = 0;
         for _ in iterator {
             count += 1;
@@ -105,7 +104,7 @@ mod tests {
 
         let iterator = volume.iter_indices();
         let (lower, upper) = iterator.size_hint();
-        
+
         let mut count: usize = 0;
         for _ in iterator {
             count += 1;
@@ -129,7 +128,10 @@ mod tests {
         let stitched_volume: Volume<i32, 16, 34, 16> = stitch(&vol1, &vol2, Axis::Y).unwrap();
 
         assert_eq!(stitched_volume[vol1_anomaly], 42);
-        assert_eq!(stitched_volume[na::vector![0, 10, 0usize] + vol2_anomaly], 64);
+        assert_eq!(
+            stitched_volume[na::vector![0, 10, 0usize] + vol2_anomaly],
+            64
+        );
     }
 
     #[test]

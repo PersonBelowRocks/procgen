@@ -1,9 +1,9 @@
 extern crate nalgebra as na;
 
-mod volume;
-mod chunk;
 mod block;
+mod chunk;
 mod util;
+mod volume;
 
 #[tokio::main]
 async fn main() {
@@ -11,6 +11,4 @@ async fn main() {
 }
 
 #[cfg(test)]
-mod tests {
-
-}
+mod tests {}
