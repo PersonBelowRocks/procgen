@@ -1,14 +1,14 @@
 use crate::{volume::CubicVolume, block::BlockId};
 
-const CHUNK_SECTION_SIZE: usize = 16;
+pub const CHUNK_SECTION_SIZE: usize = 16;
 
 pub type ChunkSection = CubicVolume<BlockId, CHUNK_SECTION_SIZE>;
 
 type IVec2 = na::Vector2<i32>;
 
 pub struct Chunk {
-    pos: IVec2,
-    sections: Vec<Option<Box<ChunkSection>>>
+    pub(super) pos: IVec2,
+    pub(super) sections: Vec<Option<Box<ChunkSection>>>
 }
 
 impl Chunk {
