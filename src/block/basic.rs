@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Default, Debug, PartialEq, Copy, Clone)]
 pub struct BlockId(u32);
 
 impl BlockId {
