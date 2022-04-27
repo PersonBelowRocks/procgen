@@ -14,16 +14,34 @@ mod tests {
 
     use super::*;
 
+    /// Produce an example chunk for testing purposes. This function is purely for ergonomics and the chunk is not special in any way.
+    ///
+    /// # Example
+    /// ```
+    /// extern crate nalgebra as na;
+    ///
+    /// let chunk = example_chunk();
+    ///
+    /// assert_eq!(320, chunk.max_y());
+    /// assert_eq!(-64, chunk.min_y());
+    /// assert_eq!(BlockId::from(0), chunk.default_id());
+    /// assert_eq!(na::vector![2, 2], chunk.pos());
+    /// assert_eq!(384, chunk.abs_height());
+    /// ```
+    fn example_chunk() -> Chunk {
+        Chunk::try_new(na::vector![2, 2], 320, -64, BlockId::from(0)).unwrap()
+    }
+
     #[test]
     fn basics() {
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let chunk = example_chunk();
 
         assert_eq!(384, chunk.abs_height());
         assert_eq!(-64, chunk.min_y());
         assert_eq!(320, chunk.max_y());
 
         // Chunk with weird min_y bounds (not divisible by CHUNK_SECTION_SIZE)
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -62).unwrap();
+        let chunk = Chunk::try_new(na::vector![2, 2], 320, -62, BlockId::from(0)).unwrap();
 
         assert_eq!(368, chunk.abs_height());
         // Should be rounded down to nearest number divisible by CHUNK_SECTION_SIZE
@@ -31,7 +49,7 @@ mod tests {
         assert_eq!(320, chunk.max_y());
 
         // Chunk with weird min_y bounds (not divisible by CHUNK_SECTION_SIZE)
-        let chunk = Chunk::try_new(na::vector![2, 2], 338, -64).unwrap();
+        let chunk = Chunk::try_new(na::vector![2, 2], 338, -64, BlockId::from(0)).unwrap();
 
         assert_eq!(400, chunk.abs_height());
         assert_eq!(-64, chunk.min_y());
@@ -41,7 +59,7 @@ mod tests {
 
     #[test]
     fn bounds_checks() {
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let chunk = example_chunk();
 
         assert!(chunk.within_bounds(na::vector![40, 200, 47]));
 
@@ -78,7 +96,7 @@ mod tests {
 
     #[test]
     fn indexing() {
-        let mut chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let mut chunk = example_chunk();
 
         let example_idx = na::vector![10, -60, 10i32];
 
@@ -104,7 +122,7 @@ mod tests {
 
     #[test]
     fn indexing_mut() {
-        let mut chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let mut chunk = example_chunk();
 
         let example_idx = na::vector![10, 200, 10i32];
 
@@ -120,7 +138,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn indexing_oob() {
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let chunk = example_chunk();
 
         let idx = na::vector![14, -100, 10i32];
         // This index should be out of bounds and we should panic when trying to access it.
@@ -132,7 +150,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn indexing_uninitialized_section() {
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let chunk = example_chunk();
 
         let idx = na::vector![14, 10, 10i32];
         // This index should be within bounds, and we should panic when we access it (section not initialized).
@@ -148,7 +166,7 @@ mod tests {
         // Specifically we want it to go wrong because the index vector is messed up,
         // but we can't check if that's the reason it failed or because the vector is (for example) OOB.
         // FIXME: pretty please?
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let chunk = example_chunk();
 
         let idx = na::vector![i32::MAX, 10, 10];
         // This index is really busted and we should panic when trying to use it (it should fail while casting).
@@ -157,7 +175,7 @@ mod tests {
 
     #[test]
     fn accessing() {
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let chunk = example_chunk();
 
         // This is out of bounds
         if !matches!(
@@ -184,7 +202,7 @@ mod tests {
 
     #[test]
     fn accessing_mut() {
-        let mut chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let mut chunk = example_chunk();
 
         for x in 0..16 {
             for z in 0..16 {
@@ -249,7 +267,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn accessing_invalid_vec() {
-        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        let chunk = example_chunk();
         // Way too big!
         let _ = chunk.get(na::vector![u32::MAX, 0, 0]);
     }

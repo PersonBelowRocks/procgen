@@ -1,4 +1,4 @@
-use num_traits::{NumCast, PrimInt};
+use num_traits::PrimInt;
 
 use crate::{block::BlockId, util::cast_vec3, volume::CubicVolume};
 
@@ -11,12 +11,13 @@ type IVec2 = na::Vector2<i32>;
 pub struct Chunk {
     pub(super) pos: IVec2,
     pub(super) sections: Vec<Option<Box<ChunkSection>>>,
+    default_id: BlockId,
     pub(super) max_y: i32,
     pub(super) min_y: i32,
 }
 
 impl Chunk {
-    pub fn try_new(pos: IVec2, max_y: i32, min_y: i32) -> Option<Self> {
+    pub fn try_new(pos: IVec2, max_y: i32, min_y: i32, default_id: BlockId) -> Option<Self> {
         let max_y = (max_y as i32 / CHUNK_SECTION_SIZE as i32) * CHUNK_SECTION_SIZE as i32;
         let min_y = (min_y as i32 / CHUNK_SECTION_SIZE as i32) * CHUNK_SECTION_SIZE as i32;
 
@@ -34,6 +35,7 @@ impl Chunk {
         Some(Self {
             pos,
             sections,
+            default_id,
             max_y,
             min_y,
         })
@@ -49,6 +51,10 @@ impl Chunk {
 
     pub fn max_y(&self) -> i32 {
         self.max_y
+    }
+
+    pub fn default_id(&self) -> BlockId {
+        self.default_id
     }
 
     pub fn sections(&self) -> usize {

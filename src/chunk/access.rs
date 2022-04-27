@@ -75,7 +75,8 @@ impl Chunk {
                     let y = self.chunk_y_to_index_y(y);
                     let section_idx = y as usize / CHUNK_SECTION_SIZE;
 
-                    self.sections[section_idx] = Some(Box::new(ChunkSection::default()));
+                    self.sections[section_idx] =
+                        Some(Box::new(ChunkSection::new_filled(self.default_id())));
 
                     let section_y = y % CHUNK_SECTION_SIZE as u32;
                     let slot = &mut self.sections[section_idx].as_mut().unwrap()
