@@ -10,8 +10,6 @@ pub use stitching::stitch;
 
 #[cfg(test)]
 mod tests {
-    use crate::volume::stitching::StitchError;
-
     use super::*;
 
     #[test]

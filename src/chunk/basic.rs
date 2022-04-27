@@ -51,19 +51,28 @@ impl Chunk {
         self.max_y
     }
 
+    pub fn sections(&self) -> usize {
+        self.sections.len()
+    }
+
     #[inline]
     pub fn abs_height(&self) -> u32 {
         (self.sections.capacity() as u32) * (CHUNK_SECTION_SIZE as u32)
     }
 
     #[inline]
-    pub(super) fn world_y_to_section_idx(&self, world_y: i32) -> usize {
-        (world_y - self.min_y) as usize / CHUNK_SECTION_SIZE as usize
+    pub(super) fn chunk_y_to_section_idx(&self, chunk_y: i32) -> usize {
+        (chunk_y - self.min_y) as usize / CHUNK_SECTION_SIZE
     }
 
     #[inline]
-    pub(super) fn chunk_y_to_index_y(&self, world_y: i32) -> u32 {
-        (world_y - self.min_y) as u32
+    pub(super) fn chunk_y_to_index_y(&self, chunk_y: i32) -> u32 {
+        (chunk_y - self.min_y) as u32
+    }
+
+    #[inline]
+    pub(super) fn index_y_to_chunk_y(&self, index_y: u32) -> i32 {
+        index_y as i32 + self.min_y
     }
 
     #[inline]

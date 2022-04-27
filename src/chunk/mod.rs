@@ -10,9 +10,9 @@ pub use basic::{Chunk, ChunkSection, CHUNK_SECTION_SIZE};
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::block::BlockId;
 
-    // TODO: more tests!
+    use super::*;
 
     #[test]
     fn basics() {
@@ -77,18 +77,82 @@ mod tests {
     }
 
     #[test]
-    fn indexing() {}
+    fn indexing() {
+        let mut chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+
+        let example_idx = na::vector![10, -60, 10i32];
+
+        chunk.set(example_idx, 10.into()).unwrap();
+
+        assert_eq!(BlockId::from(10), chunk[example_idx]);
+        assert_eq!(BlockId::from(0), chunk[na::vector![11, -60, 10i32]]);
+
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in -64..-48 {
+                    let idx = na::vector![x, y, z];
+
+                    if idx == example_idx {
+                        assert_eq!(BlockId::from(10), chunk[idx]);
+                    } else {
+                        assert_eq!(BlockId::from(0), chunk[idx]);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn indexing_mut() {
+        let mut chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+
+        let example_idx = na::vector![10, 200, 10i32];
+
+        chunk.set(example_idx, 10.into()).unwrap();
+
+        assert_eq!(BlockId::from(10), chunk[example_idx]);
+        assert_eq!(BlockId::from(0), chunk[na::vector![11, 200, 10i32]]);
+
+        chunk[example_idx] = BlockId::from(42);
+        assert_eq!(BlockId::from(42), chunk[example_idx]);
+    }
 
     #[test]
     #[should_panic]
     fn indexing_oob() {
-        panic!()
+        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+
+        let idx = na::vector![14, -100, 10i32];
+        // This index should be out of bounds and we should panic when trying to access it.
+        if !chunk.within_bounds_cs(idx) {
+            let _ = chunk[idx];
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn indexing_uninitialized_section() {
+        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+
+        let idx = na::vector![14, 10, 10i32];
+        // This index should be within bounds, and we should panic when we access it (section not initialized).
+        if chunk.within_bounds_cs(idx) {
+            let _ = chunk[idx];
+        }
     }
 
     #[test]
     #[should_panic]
     fn indexing_invalid_vec() {
-        panic!()
+        // This test sort of sucks because we can't really tell what went wrong if it panicked.
+        // Specifically we want it to go wrong because the index vector is messed up,
+        // but we can't check if that's the reason it failed or because the vector is (for example) OOB.
+        // FIXME: pretty please?
+        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+
+        let idx = na::vector![i32::MAX, 10, 10];
+        // This index is really busted and we should panic when trying to use it (it should fail while casting).
+        let _ = chunk[idx];
     }
 
     #[test]
@@ -103,7 +167,7 @@ mod tests {
             panic!("expected to receive Err(ChunkAccessError::IndexVectorOutOfBounds)!")
         }
 
-        // We're gonna check that every index produces a ChunkAccessError::UninitializedSection error
+        // None of these indices should be out of bounds, so we expect to see UninitializedSection for all of them.
         for x in 0..16 {
             for z in 0..16 {
                 for y in -64..320 {
@@ -119,8 +183,74 @@ mod tests {
     }
 
     #[test]
+    fn accessing_mut() {
+        let mut chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in -64..320 {
+                    if !matches!(
+                        chunk.set_manual(na::vector![x, y, z], 10.into()),
+                        Err(ChunkAccessError::UninitializedSection)
+                    ) {
+                        panic!("expected to receive Err(ChunkAccessError::UninitializedSection)!")
+                    }
+                }
+            }
+        }
+        let example_idx = na::vector![10, -54, 10i32];
+        // chunk.set(...) should initialize the section.
+        assert_eq!(BlockId::from(0), chunk.set(example_idx, 10.into()).unwrap());
+
+        // Check that this section is initialized now.
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in -64..-48 {
+                    let index = na::vector![x, y, z];
+                    let id = chunk.get(index).unwrap();
+
+                    if index == example_idx {
+                        assert_eq!(&BlockId::from(10), id);
+                    } else {
+                        assert_eq!(&BlockId::from(0), id);
+                    }
+                }
+            }
+        }
+
+        // Check that everything else is untouched.
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in -48..320 {
+                    if !matches!(
+                        chunk.set_manual(na::vector![x, y, z], 10.into()),
+                        Err(ChunkAccessError::UninitializedSection)
+                    ) {
+                        panic!("expected to receive Err(ChunkAccessError::UninitializedSection)!")
+                    }
+                }
+            }
+        }
+
+        // Initialize the rest of the sections
+        for y in 1..chunk.sections() as u32 {
+            assert_eq!(
+                BlockId::from(0),
+                chunk
+                    .set(
+                        na::vector![5, chunk.index_y_to_chunk_y(y * 16), 5],
+                        BlockId::from(8)
+                    )
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
     #[should_panic]
     fn accessing_invalid_vec() {
-        panic!()
+        let chunk = Chunk::try_new(na::vector![2, 2], 320, -64).unwrap();
+        // Way too big!
+        let _ = chunk.get(na::vector![u32::MAX, 0, 0]);
     }
 }
