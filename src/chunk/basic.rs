@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use num_traits::PrimInt;
 
 use crate::{block::BlockId, util::cast_vec3, volume::CubicVolume};
@@ -12,8 +14,7 @@ pub struct Chunk {
     pub(super) pos: IVec2,
     pub(super) sections: Vec<Option<Box<ChunkSection>>>,
     default_id: BlockId,
-    pub(super) max_y: i32,
-    pub(super) min_y: i32,
+    vertical_bounds: Range<i32>,
 }
 
 impl Chunk {
@@ -36,8 +37,7 @@ impl Chunk {
             pos,
             sections,
             default_id,
-            max_y,
-            min_y,
+            vertical_bounds: min_y..max_y,
         })
     }
 
@@ -46,11 +46,11 @@ impl Chunk {
     }
 
     pub fn min_y(&self) -> i32 {
-        self.min_y
+        self.vertical_bounds.start
     }
 
     pub fn max_y(&self) -> i32 {
-        self.max_y
+        self.vertical_bounds.end
     }
 
     pub fn default_id(&self) -> BlockId {
@@ -68,17 +68,17 @@ impl Chunk {
 
     #[inline]
     pub(super) fn chunk_y_to_section_idx(&self, chunk_y: i32) -> usize {
-        (chunk_y - self.min_y) as usize / CHUNK_SECTION_SIZE
+        (chunk_y - self.min_y()) as usize / CHUNK_SECTION_SIZE
     }
 
     #[inline]
     pub(super) fn chunk_y_to_index_y(&self, chunk_y: i32) -> u32 {
-        (chunk_y - self.min_y) as u32
+        (chunk_y - self.min_y()) as u32
     }
 
     #[inline]
     pub(super) fn index_y_to_chunk_y(&self, index_y: u32) -> i32 {
-        index_y as i32 + self.min_y
+        index_y as i32 + self.min_y()
     }
 
     #[inline]
@@ -92,7 +92,7 @@ impl Chunk {
 
         let [x, y, z]: [i32; 3] = (ws_position - chunk_corner_pos).into();
 
-        let mut within = (self.min_y..self.max_y).contains(&y);
+        let mut within = (self.min_y()..self.max_y()).contains(&y);
         within &= (0..CHUNK_SECTION_SIZE as i32).contains(&x);
         within &= (0..CHUNK_SECTION_SIZE as i32).contains(&z);
 
@@ -103,7 +103,7 @@ impl Chunk {
     pub fn within_bounds_cs<N: PrimInt>(&self, cs_position: na::Vector3<N>) -> bool {
         let [x, y, z]: [i32; 3] = cast_vec3::<i32, N>(cs_position).unwrap().into();
 
-        let mut within = (self.min_y..self.max_y).contains(&y);
+        let mut within = (self.min_y()..self.max_y()).contains(&y);
         within &= (0..CHUNK_SECTION_SIZE as i32).contains(&x);
         within &= (0..CHUNK_SECTION_SIZE as i32).contains(&z);
 
