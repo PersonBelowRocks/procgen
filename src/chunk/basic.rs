@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use num_traits::PrimInt;
 
-use crate::{block::BlockId, util::cast_vec3, volume::CubicVolume};
+use crate::{block::BlockId, util::cast_ivec3, volume::CubicVolume};
 
 pub const CHUNK_SECTION_SIZE: usize = 16;
 
@@ -88,7 +88,7 @@ impl Chunk {
             0,
             self.pos[1] * CHUNK_SECTION_SIZE as i32
         ];
-        let ws_position = cast_vec3::<i32, N>(ws_position).unwrap();
+        let ws_position = cast_ivec3::<i32, N>(ws_position).unwrap();
 
         let [x, y, z]: [i32; 3] = (ws_position - chunk_corner_pos).into();
 
@@ -101,7 +101,7 @@ impl Chunk {
 
     #[inline]
     pub fn within_bounds_cs<N: PrimInt>(&self, cs_position: na::Vector3<N>) -> bool {
-        let [x, y, z]: [i32; 3] = cast_vec3::<i32, N>(cs_position).unwrap().into();
+        let [x, y, z]: [i32; 3] = cast_ivec3::<i32, N>(cs_position).unwrap().into();
 
         let mut within = (self.min_y()..self.max_y()).contains(&y);
         within &= (0..CHUNK_SECTION_SIZE as i32).contains(&x);

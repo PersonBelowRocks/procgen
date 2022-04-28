@@ -1,6 +1,6 @@
 use num_traits::PrimInt;
 
-use crate::{block::BlockId, util::cast_vec3};
+use crate::{block::BlockId, util::cast_ivec3};
 
 use super::basic::{Chunk, ChunkSection, CHUNK_SECTION_SIZE};
 
@@ -47,7 +47,7 @@ impl Chunk {
             return Err(ChunkAccessError::IndexVectorOutOfBounds);
         }
 
-        let [x, y, z]: [i32; 3] = cast_vec3::<i32, N>(v).unwrap().into();
+        let [x, y, z]: [i32; 3] = cast_ivec3::<i32, N>(v).unwrap().into();
         let y = self.chunk_y_to_index_y(y);
 
         if let Some(section) = &self.sections[y as usize / CHUNK_SECTION_SIZE] {
@@ -68,7 +68,7 @@ impl Chunk {
             return Err(ChunkAccessError::IndexVectorOutOfBounds);
         }
 
-        let [x, y, z]: [i32; 3] = cast_vec3::<i32, N>(v).unwrap().into();
+        let [x, y, z]: [i32; 3] = cast_ivec3::<i32, N>(v).unwrap().into();
         let y = self.chunk_y_to_index_y(y);
         let section_idx = y as usize / CHUNK_SECTION_SIZE;
 
@@ -96,7 +96,7 @@ impl Chunk {
             Ok(old_id) => Ok(old_id),
             Err(error) => {
                 if matches!(error, ChunkAccessError::UninitializedSection) {
-                    let [x, y, z]: [i32; 3] = cast_vec3::<i32, N>(v).unwrap().into();
+                    let [x, y, z]: [i32; 3] = cast_ivec3::<i32, N>(v).unwrap().into();
 
                     let y = self.chunk_y_to_index_y(y);
                     let section_idx = y as usize / CHUNK_SECTION_SIZE;

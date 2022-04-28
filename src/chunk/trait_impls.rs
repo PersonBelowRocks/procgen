@@ -2,7 +2,7 @@ use std::ops::{Index, IndexMut};
 
 use num_traits::PrimInt;
 
-use crate::{block::BlockId, util::cast_vec3};
+use crate::{block::BlockId, util::cast_ivec3};
 
 use super::basic::{Chunk, CHUNK_SECTION_SIZE};
 
@@ -11,7 +11,7 @@ impl<N: PrimInt + Copy> Index<na::Vector3<N>> for Chunk {
 
     #[inline]
     fn index(&self, v: na::Vector3<N>) -> &Self::Output {
-        let [x, y, z]: [i32; 3] = cast_vec3::<i32, N>(v).unwrap().into();
+        let [x, y, z]: [i32; 3] = cast_ivec3::<i32, N>(v).unwrap().into();
         let section_idx = self.chunk_y_to_section_idx(y);
         let y = self.chunk_y_to_index_y(y);
 
@@ -24,7 +24,7 @@ impl<N: PrimInt + Copy> Index<na::Vector3<N>> for Chunk {
 impl<N: PrimInt> IndexMut<na::Vector3<N>> for Chunk {
     #[inline]
     fn index_mut(&mut self, v: na::Vector3<N>) -> &mut Self::Output {
-        let [x, y, z]: [i32; 3] = cast_vec3::<i32, N>(v).unwrap().into();
+        let [x, y, z]: [i32; 3] = cast_ivec3::<i32, N>(v).unwrap().into();
         let section_idx = self.chunk_y_to_section_idx(y);
         let y = self.chunk_y_to_index_y(y);
 
