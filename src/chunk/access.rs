@@ -19,6 +19,11 @@ pub enum ChunkAccessError {
 pub type ChunkAccessResult<T> = Result<T, ChunkAccessError>;
 
 impl Chunk {
+    /// Initialize a chunk section at the given section index.
+    /// Produces [`ChunkAccessError::SectionIndexOutOfBounds`] if the given index is out of bounds,
+    /// and [`ChunkAccessError::SectionAlreadyInitialized`] if the section at the index is already initialized.
+    ///
+    /// Otherwise returns a mut reference to the new section.
     pub fn init_section(&mut self, section_idx: usize) -> ChunkAccessResult<&mut ChunkSection> {
         let default_id = self.default_id();
 
@@ -41,6 +46,9 @@ impl Chunk {
             .unwrap())
     }
 
+    /// Get the section at the given position (chunkspace), returns
+    /// [`ChunkAccessError::IndexVectorOutOfBounds`] if the position is out of bounds for this chunk,
+    /// or [`ChunkAccessError::UninitializedSection`] if the section containing this position is not initialized.
     #[inline]
     pub fn get<N: PrimInt>(&self, v: na::Vector3<N>) -> ChunkAccessResult<&BlockId> {
         if !self.within_bounds_cs(v) {
@@ -58,6 +66,9 @@ impl Chunk {
         }
     }
 
+    /// Sets the block ID at the given position (chunkspace) to the new block ID, and returns the old one.
+    /// This method will return [`ChunkAccessError::IndexVectorOutOfBounds`] if the position is out of bounds,
+    /// or [`ChunkAccessError::UninitializedSection`] if the section at the position is not initialized.
     #[inline]
     pub fn set_manual<N: PrimInt>(
         &mut self,
@@ -82,6 +93,12 @@ impl Chunk {
         }
     }
 
+    /// Sets the block ID at the given position (chunkspace) to the new block ID, and returns the old one.
+    /// This method will return [`ChunkAccessError::IndexVectorOutOfBounds`] if the position is out of bounds.
+    ///
+    /// This method will automatically initialize a new section at the position if one doesn't already exist. This section will be
+    /// filled with the default block ID (except for the block ID at the given position).
+    /// If a new section is created when calling this function it will return the default block ID.
     #[inline]
     pub fn set<N: PrimInt>(
         &mut self,
