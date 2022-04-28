@@ -271,4 +271,28 @@ mod tests {
         // Way too big!
         let _ = chunk.get(na::vector![u32::MAX, 0, 0]);
     }
+
+    #[test]
+    fn section_initialization() {
+        let mut chunk = example_chunk();
+
+        // Index way too big
+        if !matches!(
+            chunk.init_section(100),
+            Err(ChunkAccessError::SectionIndexOutOfBounds)
+        ) {
+            panic!("expected section index 100 to be out of bounds for chunk");
+        }
+
+        if !matches!(chunk.init_section(6), Ok(_)) {
+            panic!("expected section index 6 to be valid, in bounds index for chunk")
+        }
+
+        if !matches!(
+            chunk.init_section(6),
+            Err(ChunkAccessError::SectionAlreadyInitialized)
+        ) {
+            panic!("expected section 6 to already be initialized")
+        }
+    }
 }
