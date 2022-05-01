@@ -76,12 +76,15 @@ mod test {
     #[test]
     fn chunk_parity() {
         let mut example = Chunk::try_new(na::vector![2, 2], 320, -64, BlockId::from(0)).unwrap();
-        example.set(na::vector![10, 10, 4i32], BlockId::from(42)).unwrap();
-        example.set(na::vector![10, 251, 9i32], BlockId::from(41)).unwrap();
+        example
+            .set(na::vector![10, 10, 4i32], BlockId::from(42))
+            .unwrap();
+        example
+            .set(na::vector![10, 251, 9i32], BlockId::from(41))
+            .unwrap();
 
         let bc_serialized = bincode::serialize(&example).unwrap();
-        let example_section_deserialized: Chunk =
-            bincode::deserialize(&bc_serialized[..]).unwrap();
+        let example_section_deserialized: Chunk = bincode::deserialize(&bc_serialized[..]).unwrap();
 
         assert!(example == example_section_deserialized);
     }
