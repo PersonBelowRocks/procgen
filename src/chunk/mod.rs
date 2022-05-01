@@ -5,6 +5,8 @@ mod basic;
 #[allow(dead_code)]
 mod trait_impls;
 
+mod serialization;
+
 pub use access::{ChunkAccessError, ChunkAccessResult};
 pub use basic::{Chunk, ChunkSection, CHUNK_SECTION_SIZE};
 

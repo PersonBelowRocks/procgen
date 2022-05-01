@@ -1,4 +1,6 @@
-#[derive(Default, Debug, PartialEq, Copy, Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Default, Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
 pub struct BlockId(u32);
 
 impl BlockId {

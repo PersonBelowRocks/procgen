@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use num_traits::PrimInt;
+use serde::{Deserialize, Serialize};
 
 use crate::{block::BlockId, util::cast_ivec3, volume::CubicVolume};
 
@@ -11,6 +12,7 @@ pub type ChunkSection = CubicVolume<BlockId, CHUNK_SECTION_SIZE>;
 type IVec2 = na::Vector2<i32>;
 
 // TODO: docs here explaining what/how chunks work and what chunkspace, index space, and worldspace is.
+#[derive(Serialize, Deserialize, PartialEq)]
 pub struct Chunk {
     pub(super) pos: IVec2,
     pub(super) sections: Vec<Option<Box<ChunkSection>>>,
@@ -73,6 +75,12 @@ impl Chunk {
         self.sections.len()
     }
 
+    /// The number of initialized sections in this chunk.
+    #[inline]
+    pub fn initialized_sections(&self) -> usize {
+        self.sections.iter().filter(|&s| s.is_some()).count()
+    }
+
     /// The absolute height of this chunk, aka. the distance between min_y() and max_y().
     #[inline]
     pub fn abs_height(&self) -> u32 {
@@ -127,5 +135,11 @@ impl Chunk {
         within &= (0..CHUNK_SECTION_SIZE as i32).contains(&z);
 
         within
+    }
+
+    /// The number of initialized blocks stored by this chunk. Equal to `self.initialized_sections() * CHUNK_SECTION_SIZE`.
+    #[inline]
+    pub fn blocks(&self) -> u32 {
+        (self.initialized_sections() * CHUNK_SECTION_SIZE) as u32
     }
 }
