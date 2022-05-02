@@ -56,6 +56,7 @@ impl<'de> Deserialize<'de> for ChunkSection {
 
 #[cfg(test)]
 mod test {
+
     // TODO: better/more serialization testing
     use crate::{block::BlockId, chunk::Chunk};
 
@@ -64,7 +65,9 @@ mod test {
     #[test]
     fn chunk_section_parity() {
         let mut example_section = ChunkSection::new_filled(BlockId::from(10));
-        example_section[na::vector![10, 10, 4]] = BlockId::from(42);
+        for (n, idx) in example_section.iter_indices().enumerate() {
+            example_section[idx] = BlockId::from(n as u32);
+        }
 
         let bc_serialized = bincode::serialize(&example_section).unwrap();
         let example_section_deserialized: ChunkSection =

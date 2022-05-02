@@ -2,12 +2,16 @@ extern crate nalgebra as na;
 
 mod block;
 mod chunk;
+mod generate;
+mod net;
 mod util;
 mod volume;
 
 #[tokio::main]
 async fn main() {
-    println!("Hello World!")
+    let server = net::server::Server::new()
+        .with_version(net::protocol::ProtocolVersion::V1)
+        .with_compression_threshold(256);
 }
 
 #[cfg(test)]
