@@ -33,3 +33,26 @@ impl<N: PrimInt> IndexMut<na::Vector3<N>> for Chunk {
         &mut section[na::vector![x, y as i32 % CHUNK_SECTION_SIZE as i32, z]]
     }
 }
+
+impl std::fmt::Debug for Chunk {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let initialized_sections = self
+            .sections
+            .iter()
+            .map(|s| match s {
+                Some(_) => "#",
+                None => ".",
+            })
+            .fold(String::new(), |accum, item| accum + item);
+
+        write!(formatter, "Chunk {{")?;
+        write!(formatter, "   pos: {},", self.pos())?;
+        write!(formatter, "   sections: {}", initialized_sections)?;
+        write!(formatter, "   default_id: {:?}", self.default_id())?;
+        write!(
+            formatter,
+            "   vertical_bounds: {:?}",
+            self.min_y()..self.max_y()
+        )
+    }
+}

@@ -8,7 +8,7 @@ mod trait_impls;
 mod serialization;
 
 pub use access::{ChunkAccessError, ChunkAccessResult};
-pub use basic::{Chunk, ChunkSection, CHUNK_SECTION_SIZE};
+pub use basic::{Chunk, ChunkSection, IVec2, CHUNK_SECTION_SIZE};
 
 #[cfg(test)]
 mod tests {

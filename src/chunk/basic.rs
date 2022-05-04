@@ -9,7 +9,7 @@ pub const CHUNK_SECTION_SIZE: usize = 16;
 
 pub type ChunkSection = CubicVolume<BlockId, CHUNK_SECTION_SIZE>;
 
-type IVec2 = na::Vector2<i32>;
+pub type IVec2 = na::Vector2<i32>;
 
 // TODO: docs here explaining what/how chunks work and what chunkspace, index space, and worldspace is.
 #[derive(Serialize, Deserialize, PartialEq)]

@@ -10,6 +10,8 @@ anyhow = "1.0"
 num-traits = "0.2.14"
 bincode = "1.3.3"
 flate2 = "1.0"
+enum-ordinalize = "3.1"
+threadpool = "1.8"
 
 [dependencies.tokio]
 version = "1.17"
