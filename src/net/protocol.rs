@@ -1,5 +1,4 @@
-use enum_ordinalize::Ordinalize;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::chunk::{Chunk, IVec2};
 
@@ -22,8 +21,8 @@ pub type RequestId = u32;
 pub struct GeneratorResponseCode(u8);
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct RequestRegisterGenerator<'a> {
-    name: &'a str,
+pub struct RequestRegisterGenerator {
+    name: String,
     generator_id: GeneratorId,
 }
 
@@ -45,16 +44,16 @@ pub struct RespondGenerateChunk {
     chunk: Chunk,
 }
 
-pub trait Packet<'a> {
+pub trait Packet {
     const PACKET_ID: u32;
 
     fn to_bytes(&self, version: ProtocolVersion) -> Vec<u8>;
-    fn from_bytes(bytes: &'a [u8], version: ProtocolVersion) -> Self;
+    fn from_bytes(bytes: Vec<u8>, version: ProtocolVersion) -> Self;
 }
 
-trait BincodePacket<'a>
+trait BincodePacket
 where
-    Self: Serialize + Deserialize<'a> + Packet<'a>,
+    Self: Serialize + DeserializeOwned + Packet,
 {
     const PACKET_ID: u32;
 
@@ -64,40 +63,54 @@ where
     }
 
     #[inline]
-    fn from_bytes(bytes: &'a [u8], _version: ProtocolVersion) -> Self {
-        bincode::deserialize(bytes).unwrap()
+    fn from_bytes(bytes: Vec<u8>, _version: ProtocolVersion) -> Self {
+        bincode::deserialize_from(bytes.as_slice()).unwrap()
     }
 }
 
-impl<'a, T> Packet<'a> for T
+impl<'a, T> Packet for T
 where
-    T: BincodePacket<'a>,
+    T: BincodePacket,
 {
-    const PACKET_ID: u32 = <Self as BincodePacket<'a>>::PACKET_ID;
+    const PACKET_ID: u32 = <Self as BincodePacket>::PACKET_ID;
 
     #[inline]
     fn to_bytes(&self, version: ProtocolVersion) -> Vec<u8> {
-        <Self as BincodePacket<'a>>::to_bytes(self, version)
+        <Self as BincodePacket>::to_bytes(self, version)
     }
 
     #[inline]
-    fn from_bytes(bytes: &'a [u8], version: ProtocolVersion) -> Self {
-        <Self as BincodePacket<'a>>::from_bytes(bytes, version)
+    fn from_bytes(bytes: Vec<u8>, version: ProtocolVersion) -> Self {
+        <Self as BincodePacket>::from_bytes(bytes, version)
     }
 }
 
-impl<'a> BincodePacket<'a> for RequestRegisterGenerator<'a> {
+impl BincodePacket for RequestRegisterGenerator {
     const PACKET_ID: u32 = 0x01;
 }
 
-impl<'a> BincodePacket<'a> for RespondRegisterGenerator {
+impl BincodePacket for RespondRegisterGenerator {
     const PACKET_ID: u32 = 0x02;
 }
 
-impl<'a> BincodePacket<'a> for RequestGenerateChunk {
+impl BincodePacket for RequestGenerateChunk {
     const PACKET_ID: u32 = 0x03;
 }
 
-impl<'a> BincodePacket<'a> for RespondGenerateChunk {
+impl BincodePacket for RespondGenerateChunk {
     const PACKET_ID: u32 = 0x04;
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum DownstreamPacket {
+    RequestRegisterGenerator(RequestRegisterGenerator),
+    RequestGenerateChunk(RequestGenerateChunk),
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum UpstreamPacket {
+    RespondRegisterGenerator(RespondRegisterGenerator),
+    RespondGenerateChunk(RespondGenerateChunk),
 }
