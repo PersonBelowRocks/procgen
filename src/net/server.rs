@@ -1,12 +1,12 @@
-use flate2::read::ZlibDecoder;
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use std::{
-    io::Read,
+    io::{Read, Write},
     mem::size_of,
     net::{SocketAddr, SocketAddrV4},
     sync::Arc,
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncReadExt, BufReader},
+    io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
     sync::RwLock,
 };
@@ -15,7 +15,7 @@ use crate::generate::Generator;
 
 use super::{
     generator_manager::GeneratorManager,
-    protocol::{DownstreamPacket, GeneratorId, ProtocolVersion},
+    protocol::{DownstreamPacket, GeneratorId, Packet, ProtocolVersion},
 };
 
 pub struct Server {
@@ -111,6 +111,49 @@ impl PacketReactor {
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct PacketHeader {
+    pub compressed_len: u32,
+    pub decompressed_len: u32,
+}
+
+impl PacketHeader {
+    pub fn new(compressed_len: u32, decompressed_len: u32) -> Self {
+        Self {
+            compressed_len,
+            decompressed_len,
+        }
+    }
+
+    fn compr_len_bytes(&self) -> [u8; 4] {
+        self.compressed_len.to_be_bytes()
+    }
+
+    fn decompr_len_bytes(&self) -> [u8; 4] {
+        self.decompressed_len.to_be_bytes()
+    }
+
+    pub async fn write<S>(&self, stream: &mut S) -> anyhow::Result<()>
+    where
+        S: AsyncWrite + AsyncWriteExt + Unpin,
+    {
+        stream.write_all(&self.compr_len_bytes()).await?;
+        stream.write_all(&self.decompr_len_bytes()).await?;
+
+        Ok(())
+    }
+
+    pub async fn read<S>(stream: &mut S) -> anyhow::Result<Self>
+    where
+        S: AsyncBufRead + AsyncReadExt + Unpin,
+    {
+        let compr_len = stream.read_u32().await?;
+        let decompr_len = stream.read_u32().await?;
+
+        Ok(Self::new(compr_len, decompr_len))
+    }
+}
+
 #[derive(Debug)]
 pub struct AnonymousPacket {
     pub id: u32,
@@ -119,6 +162,7 @@ pub struct AnonymousPacket {
 
 pub struct PacketCompressor {
     compression_threshold: usize,
+    compression_level: Compression,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -130,21 +174,11 @@ enum PacketReadingError {
 }
 
 impl PacketCompressor {
-    pub(self) fn new(compression_threshold: usize) -> Self {
+    pub(self) fn new(compression_threshold: usize, compression_level: Compression) -> Self {
         Self {
             compression_threshold,
+            compression_level,
         }
-    }
-
-    /// Reads a packet's header from a stream, returning the packet's compressed length and decompressed length.
-    pub(self) async fn read_header<S>(stream: &mut S) -> anyhow::Result<(usize, usize)>
-    where
-        S: AsyncBufRead + AsyncReadExt + Unpin,
-    {
-        let compressed_length = stream.read_u32().await? as usize;
-        let decompressed_length = stream.read_u32().await? as usize;
-
-        Ok((compressed_length, decompressed_length))
     }
 
     /// Read a compressed packet from the stream.
@@ -194,8 +228,12 @@ impl PacketCompressor {
     where
         S: AsyncBufRead + AsyncReadExt + Unpin,
     {
-        // Compressed length, decompressed length
-        let (compr_len, decompr_len) = Self::read_header(stream).await?;
+        let header = PacketHeader::read(stream).await?;
+
+        // Compressed length
+        let compr_len = header.compressed_len as usize;
+        // Decompressed length
+        let decompr_len = header.decompressed_len as usize;
 
         let packet_buffer: Box<[u8]> = if decompr_len > self.compression_threshold {
             Self::read_compressed(stream, compr_len, decompr_len).await?
@@ -217,6 +255,45 @@ impl PacketCompressor {
             id,
             bytes: packet_buffer[ID_PREFIX_SIZE..].to_vec().into_boxed_slice(),
         })
+    }
+
+    /// Compress a slice using this compressor's compression level.
+    #[inline]
+    pub(self) fn compress(&self, bytes: &[u8]) -> anyhow::Result<Box<[u8]>> {
+        let mut buf = Vec::<u8>::new();
+        ZlibEncoder::new(&mut buf, self.compression_level).write_all(bytes)?;
+        Ok(buf.into_boxed_slice())
+    }
+
+    pub async fn write_packet<S, P>(&self, stream: &mut S, packet: &P) -> anyhow::Result<()>
+    where
+        S: AsyncWrite + AsyncWriteExt + Unpin,
+        P: Packet,
+    {
+        let bytes = {
+            let mut buf = P::PACKET_ID.to_be_bytes().to_vec();
+            let packet_body = packet.to_bytes(Default::default()).into_boxed_slice();
+            buf.extend_from_slice(&packet_body);
+            buf.into_boxed_slice()
+        };
+
+        let uncompressed_len = bytes.len();
+        if uncompressed_len > self.compression_threshold {
+            let compressed_packet = self.compress(&bytes)?;
+            let compressed_len = compressed_packet.len();
+
+            let header = PacketHeader::new(compressed_len as u32, uncompressed_len as u32);
+
+            header.write(stream).await?;
+            stream.write_all(&compressed_packet).await?;
+        } else {
+            let header = PacketHeader::new(uncompressed_len as u32, uncompressed_len as u32);
+
+            header.write(stream).await?;
+            stream.write_all(&bytes).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -275,24 +352,42 @@ mod tests {
 
         use super::*;
         use flate2::{write::ZlibEncoder, Compression};
-        use tokio::io::BufReader;
+        use tokio::io::{BufReader, BufWriter};
 
         #[tokio::test]
         async fn read_header() {
-            let mut buffer: Vec<u8> = vec![];
+            for compr_len in 0..256u32 {
+                for decompr_len in 0..256u32 {
+                    let mut buffer = Vec::<u8>::new();
+                    buffer.extend_from_slice(&compr_len.to_be_bytes());
+                    buffer.extend_from_slice(&decompr_len.to_be_bytes());
 
-            const COMPRESSED_LENGTH: u32 = 42;
-            const DECOMPRESSED_LENGTH: u32 = 21;
+                    let h1 = PacketHeader::new(compr_len, decompr_len);
+                    let mut reader = BufReader::new(buffer.as_slice());
 
-            buffer.extend_from_slice(&COMPRESSED_LENGTH.to_be_bytes());
-            buffer.extend_from_slice(&DECOMPRESSED_LENGTH.to_be_bytes());
+                    let h2 = PacketHeader::read(&mut reader).await.unwrap();
+                    assert_eq!(h1, h2);
+                }
+            }
+        }
 
-            let mut reader = BufReader::new(buffer.as_slice());
-            let (compr_len, decompr_len) =
-                PacketCompressor::read_header(&mut reader).await.unwrap();
+        #[tokio::test]
+        async fn write_header() {
+            for compr_len in 0..256u32 {
+                for decompr_len in 0..256u32 {
+                    let mut buffer = Vec::<u8>::new();
+                    buffer.extend_from_slice(&compr_len.to_be_bytes());
+                    buffer.extend_from_slice(&decompr_len.to_be_bytes());
 
-            assert_eq!(COMPRESSED_LENGTH as usize, compr_len);
-            assert_eq!(DECOMPRESSED_LENGTH as usize, decompr_len);
+                    let h1 = PacketHeader::new(compr_len, decompr_len);
+                    let mut write_buf = Vec::<u8>::new();
+                    let mut writer = BufWriter::new(&mut write_buf);
+                    h1.write(&mut writer).await.unwrap();
+                    writer.flush().await.unwrap();
+
+                    assert_eq!(buffer, write_buf);
+                }
+            }
         }
 
         #[tokio::test]
@@ -314,7 +409,7 @@ mod tests {
             buffer.extend_from_slice(packet_buffer.as_slice());
 
             let mut reader = BufReader::new(buffer.as_slice());
-            let anon_packet = PacketCompressor::new(42)
+            let anon_packet = PacketCompressor::new(42, Compression::best())
                 .read_packet(&mut reader)
                 .await
                 .unwrap();
@@ -356,7 +451,7 @@ mod tests {
             buffer.extend_from_slice(compressed_packet_buffer.as_slice());
 
             let mut reader = BufReader::new(buffer.as_slice());
-            let anon_packet = PacketCompressor::new(128)
+            let anon_packet = PacketCompressor::new(128, Compression::best())
                 .read_packet(&mut reader)
                 .await
                 .unwrap();
@@ -368,5 +463,7 @@ mod tests {
 
             assert_eq!(chunk, deserialized_chunk);
         }
+
+        // TODO: tests for writing packets
     }
 }
