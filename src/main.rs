@@ -9,6 +9,8 @@ mod volume;
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
+
     let _server = net::server::Server::new()
         .with_version(net::protocol::ProtocolVersion::V1)
         .with_compression_threshold(256);
