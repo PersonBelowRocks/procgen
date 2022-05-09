@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::RwLock,
 };
@@ -11,9 +11,9 @@ use tokio::{
 use crate::generate::Generator;
 
 use super::{
-    compressor::PacketCompressor,
+    connection::Connection,
     generator_manager::GeneratorManager,
-    protocol::{DownstreamPacket, GeneratorId, ProtocolVersion},
+    protocol::{GeneratorId, ProtocolVersion},
 };
 
 pub struct Server {
@@ -163,65 +163,8 @@ pub struct AnonymousPacket {
 
 /// Convenience trait implemented for all types that are [`AsyncRead`] + [`AsyncReadExt`] + [`AsyncWrite`] + [`AsyncWriteExt`].
 /// Doesn't do anything on its own but acts as a convenience trait so you don't need to write the long bounds above.
-trait AsyncStream: AsyncRead + AsyncReadExt + AsyncWrite + AsyncWriteExt {}
+pub(super) trait AsyncStream: AsyncRead + AsyncReadExt + AsyncWrite + AsyncWriteExt {}
 impl<S> AsyncStream for S where S: AsyncRead + AsyncReadExt + AsyncWrite + AsyncWriteExt {}
-
-// This struct is generic so that we can use mock streams for testing and TCP streams in the actual program.
-#[derive(Debug)]
-struct Connection<S>
-where
-    S: AsyncStream,
-{
-    stream: Arc<RwLock<BufReader<S>>>,
-    compressor: Arc<PacketCompressor>,
-    address: SocketAddrV4,
-}
-
-// Rust didn't want to derive clone for some reason so we gotta implement it ourselves.
-impl<S> Clone for Connection<S>
-where
-    S: AsyncStream,
-{
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            stream: self.stream.clone(),
-            compressor: self.compressor.clone(),
-            address: self.address,
-        }
-    }
-}
-
-impl<S> Connection<S>
-where
-    S: AsyncStream,
-{
-    fn new(address: SocketAddrV4, stream: S, compressor: Arc<PacketCompressor>) -> Self {
-        let stream = BufReader::new(stream);
-
-        Self {
-            stream: Arc::new(RwLock::new(stream)),
-            compressor,
-            address,
-        }
-    }
-
-    fn address(&self) -> SocketAddrV4 {
-        self.address
-    }
-
-    fn can_write(&self) -> bool {
-        self.stream.try_write().is_ok()
-    }
-
-    async fn read_packet(&mut self) -> DownstreamPacket {
-        todo!()
-    }
-
-    async fn write_packet(&mut self) {
-        todo!()
-    }
-}
 
 #[derive(Debug)]
 struct Listener {
