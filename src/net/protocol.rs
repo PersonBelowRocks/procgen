@@ -47,8 +47,8 @@ pub struct RespondGenerateChunk {
 pub trait Packet {
     const PACKET_ID: u32;
 
-    fn to_bytes(&self, version: ProtocolVersion) -> Vec<u8>;
-    fn from_bytes(bytes: Vec<u8>, version: ProtocolVersion) -> Self;
+    fn to_bytes(&self) -> Vec<u8>;
+    fn from_bytes(bytes: Vec<u8>) -> Self;
 }
 
 trait BincodePacket
@@ -58,12 +58,12 @@ where
     const PACKET_ID: u32;
 
     #[inline]
-    fn to_bytes(&self, _version: ProtocolVersion) -> Vec<u8> {
+    fn to_bytes(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
 
     #[inline]
-    fn from_bytes(bytes: Vec<u8>, _version: ProtocolVersion) -> Self {
+    fn from_bytes(bytes: Vec<u8>) -> Self {
         bincode::deserialize_from(bytes.as_slice()).unwrap()
     }
 }
@@ -75,13 +75,13 @@ where
     const PACKET_ID: u32 = <Self as BincodePacket>::PACKET_ID;
 
     #[inline]
-    fn to_bytes(&self, version: ProtocolVersion) -> Vec<u8> {
-        <Self as BincodePacket>::to_bytes(self, version)
+    fn to_bytes(&self) -> Vec<u8> {
+        <Self as BincodePacket>::to_bytes(self)
     }
 
     #[inline]
-    fn from_bytes(bytes: Vec<u8>, version: ProtocolVersion) -> Self {
-        <Self as BincodePacket>::from_bytes(bytes, version)
+    fn from_bytes(bytes: Vec<u8>) -> Self {
+        <Self as BincodePacket>::from_bytes(bytes)
     }
 }
 

@@ -1,8 +1,12 @@
 use std::{net::SocketAddrV4, sync::Arc};
 
-use tokio::{io::BufReader, sync::RwLock};
+use tokio::{io::BufReader, sync::RwLockWriteGuard};
 
-use super::{compressor::PacketCompressor, protocol::DownstreamPacket, server::AsyncStream};
+use super::{
+    compressor::PacketCompressor,
+    protocol::{DownstreamPacket, Packet, RequestGenerateChunk, RequestRegisterGenerator},
+    server::AsyncStream,
+};
 
 // This struct is generic so that we can use mock streams for testing and TCP streams in the actual program.
 #[derive(Debug)]
@@ -10,35 +14,20 @@ pub(super) struct Connection<S>
 where
     S: AsyncStream,
 {
-    stream: Arc<RwLock<BufReader<S>>>,
+    stream: BufReader<S>,
     compressor: Arc<PacketCompressor>,
     address: SocketAddrV4,
 }
 
-// Rust didn't want to derive clone for some reason so we gotta implement it ourselves.
-impl<S> Clone for Connection<S>
-where
-    S: AsyncStream,
-{
-    #[inline]
-    fn clone(&self) -> Self {
-        Self {
-            stream: self.stream.clone(),
-            compressor: self.compressor.clone(),
-            address: self.address,
-        }
-    }
-}
-
 impl<S> Connection<S>
 where
-    S: AsyncStream,
+    S: AsyncStream + Unpin,
 {
     pub(super) fn new(address: SocketAddrV4, stream: S, compressor: Arc<PacketCompressor>) -> Self {
         let stream = BufReader::new(stream);
 
         Self {
-            stream: Arc::new(RwLock::new(stream)),
+            stream,
             compressor,
             address,
         }
@@ -48,11 +37,7 @@ where
         self.address
     }
 
-    pub(super) fn can_write(&self) -> bool {
-        self.stream.try_write().is_ok()
-    }
-
-    pub(super) async fn read_packet(&mut self) -> DownstreamPacket {
+    pub(super) async fn read_packet(&mut self) -> anyhow::Result<DownstreamPacket> {
         todo!()
     }
 

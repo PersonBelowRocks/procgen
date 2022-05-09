@@ -19,7 +19,7 @@ use super::{
 pub struct Server {
     reactor: Option<()>,
     listener: Option<Arc<Listener>>,
-    connections: Arc<RwLock<Vec<Connection<TcpStream>>>>,
+    connections: Arc<RwLock<Vec<Arc<Connection<TcpStream>>>>>,
     generator_manager: Arc<RwLock<GeneratorManager>>,
     version: ProtocolVersion,
     compression_threshold: Option<usize>,
@@ -84,6 +84,8 @@ impl Server {
         tokio::spawn(async move {
             loop {
                 if let Some(connection) = listener.accept_incoming().await {
+                    let connection = Arc::new(connection);
+
                     connections.write().await.push(connection.clone());
                     tokio::spawn(async move {
                         dbg!(connection.address());
@@ -146,7 +148,7 @@ impl PacketHeader {
 
     pub async fn read<S>(stream: &mut S) -> anyhow::Result<Self>
     where
-        S: AsyncBufRead + AsyncReadExt + Unpin,
+        S: AsyncRead + AsyncReadExt + Unpin,
     {
         let compr_len = stream.read_u32().await?;
         let decompr_len = stream.read_u32().await?;

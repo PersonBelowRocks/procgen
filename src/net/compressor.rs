@@ -4,7 +4,7 @@ use std::{
 };
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
-use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::{
     protocol::Packet,
@@ -34,15 +34,15 @@ impl PacketCompressor {
     }
 
     /// Reads a packet's header from a stream, returning the packet's compressed length and decompressed length.
-    pub(super) async fn read_header<S>(stream: &mut S) -> anyhow::Result<(usize, usize)>
-    where
-        S: AsyncBufRead + AsyncReadExt + Unpin,
-    {
-        let compressed_length = stream.read_u32().await? as usize;
-        let decompressed_length = stream.read_u32().await? as usize;
+    // pub(super) async fn read_header<S>(stream: &mut S) -> anyhow::Result<(usize, usize)>
+    // where
+    //     S: AsyncRead + AsyncReadExt + Unpin,
+    // {
+    //     let compressed_length = stream.read_u32().await? as usize;
+    //     let decompressed_length = stream.read_u32().await? as usize;
 
-        Ok((compressed_length, decompressed_length))
-    }
+    //     Ok((compressed_length, decompressed_length))
+    // }
 
     /// Read a compressed packet from the stream.
     pub(super) async fn read_compressed<S>(
@@ -51,7 +51,7 @@ impl PacketCompressor {
         decompr_len: usize,
     ) -> anyhow::Result<Box<[u8]>>
     where
-        S: AsyncBufRead + AsyncReadExt + Unpin,
+        S: AsyncRead + AsyncReadExt + Unpin,
     {
         let mut compr_buffer = vec![0u8; compr_len];
         let mut decompr_buffer = vec![0u8; decompr_len];
@@ -77,7 +77,7 @@ impl PacketCompressor {
         len: usize,
     ) -> anyhow::Result<Box<[u8]>>
     where
-        S: AsyncBufRead + AsyncReadExt + Unpin,
+        S: AsyncRead + AsyncReadExt + Unpin,
     {
         let mut buffer = vec![0u8; len];
 
@@ -92,10 +92,12 @@ impl PacketCompressor {
     /// handling potential deserialization of this data (and associated complications/errors).
     pub async fn read_packet<S>(&self, stream: &mut S) -> anyhow::Result<AnonymousPacket>
     where
-        S: AsyncBufRead + AsyncReadExt + Unpin,
+        S: AsyncRead + AsyncReadExt + Unpin,
     {
-        // Compressed length, decompressed length
-        let (compr_len, decompr_len) = Self::read_header(stream).await?;
+        let header = PacketHeader::read(stream).await?;
+
+        let compr_len = header.compressed_len as usize;
+        let decompr_len = header.decompressed_len as usize;
 
         let packet_buffer: Box<[u8]> = if decompr_len > self.compression_threshold {
             Self::read_compressed(stream, compr_len, decompr_len).await?
@@ -134,7 +136,7 @@ impl PacketCompressor {
     {
         let bytes = {
             let mut buf = P::PACKET_ID.to_be_bytes().to_vec();
-            let packet_body = packet.to_bytes(Default::default()).into_boxed_slice();
+            let packet_body = packet.to_bytes().into_boxed_slice();
             buf.extend_from_slice(&packet_body);
             buf.into_boxed_slice()
         };
@@ -187,11 +189,11 @@ mod tests {
             buffer.extend_from_slice(&DECOMPRESSED_LENGTH.to_be_bytes());
 
             let mut reader = BufReader::new(buffer.as_slice());
-            let (compr_len, decompr_len) =
-                PacketCompressor::read_header(&mut reader).await.unwrap();
 
-            assert_eq!(COMPRESSED_LENGTH as usize, compr_len);
-            assert_eq!(DECOMPRESSED_LENGTH as usize, decompr_len);
+            let header = PacketHeader::read(&mut reader).await.unwrap();
+
+            assert_eq!(COMPRESSED_LENGTH, header.compressed_len);
+            assert_eq!(DECOMPRESSED_LENGTH, header.decompressed_len);
         }
 
         #[tokio::test]
