@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
     sync::RwLock,
 };
@@ -112,6 +112,49 @@ impl PacketReactor {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub(super) struct PacketHeader {
+    pub compressed_len: u32,
+    pub decompressed_len: u32,
+}
+
+impl PacketHeader {
+    pub fn new(compressed_len: u32, decompressed_len: u32) -> Self {
+        Self {
+            compressed_len,
+            decompressed_len,
+        }
+    }
+
+    fn compr_len_bytes(&self) -> [u8; 4] {
+        self.compressed_len.to_be_bytes()
+    }
+
+    fn decompr_len_bytes(&self) -> [u8; 4] {
+        self.decompressed_len.to_be_bytes()
+    }
+
+    pub async fn write<S>(&self, stream: &mut S) -> anyhow::Result<()>
+    where
+        S: AsyncWrite + AsyncWriteExt + Unpin,
+    {
+        stream.write_all(&self.compr_len_bytes()).await?;
+        stream.write_all(&self.decompr_len_bytes()).await?;
+
+        Ok(())
+    }
+
+    pub async fn read<S>(stream: &mut S) -> anyhow::Result<Self>
+    where
+        S: AsyncBufRead + AsyncReadExt + Unpin,
+    {
+        let compr_len = stream.read_u32().await?;
+        let decompr_len = stream.read_u32().await?;
+
+        Ok(Self::new(compr_len, decompr_len))
+    }
+}
+
 #[derive(Debug)]
 pub struct AnonymousPacket {
     pub id: u32,
@@ -130,7 +173,7 @@ where
     S: AsyncStream,
 {
     stream: Arc<RwLock<BufReader<S>>>,
-    compressor: PacketCompressor,
+    compressor: Arc<PacketCompressor>,
     address: SocketAddrV4,
 }
 
@@ -143,6 +186,7 @@ where
     fn clone(&self) -> Self {
         Self {
             stream: self.stream.clone(),
+            compressor: self.compressor.clone(),
             address: self.address,
         }
     }
@@ -152,11 +196,12 @@ impl<S> Connection<S>
 where
     S: AsyncStream,
 {
-    fn new(address: SocketAddrV4, stream: S) -> Self {
+    fn new(address: SocketAddrV4, stream: S, compressor: Arc<PacketCompressor>) -> Self {
         let stream = BufReader::new(stream);
 
         Self {
             stream: Arc::new(RwLock::new(stream)),
+            compressor,
             address,
         }
     }
@@ -195,7 +240,7 @@ impl Listener {
             SocketAddr::V4(a) => a,
             _ => unreachable!(),
         };
-
-        Some(Connection::new(addr, stream))
+        todo!()
+        // Some(Connection::new(addr, stream))
     }
 }

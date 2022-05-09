@@ -1,9 +1,15 @@
-use std::{io::Read, mem::size_of};
+use std::{
+    io::{Read, Write},
+    mem::size_of,
+};
 
-use flate2::{read::ZlibDecoder, Compression};
-use tokio::io::{AsyncBufRead, AsyncReadExt};
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
+use tokio::io::{AsyncBufRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::server::AnonymousPacket;
+use super::{
+    protocol::Packet,
+    server::{AnonymousPacket, PacketHeader},
+};
 
 #[derive(Debug)]
 pub struct PacketCompressor {
@@ -112,6 +118,45 @@ impl PacketCompressor {
             bytes: packet_buffer[ID_PREFIX_SIZE..].to_vec().into_boxed_slice(),
         })
     }
+
+    /// Compress a slice using this compressor's compression level.
+    #[inline]
+    pub(self) fn compress(&self, bytes: &[u8]) -> anyhow::Result<Box<[u8]>> {
+        let mut buf = Vec::<u8>::new();
+        ZlibEncoder::new(&mut buf, self.compression_level).write_all(bytes)?;
+        Ok(buf.into_boxed_slice())
+    }
+
+    pub async fn write_packet<S, P>(&self, stream: &mut S, packet: &P) -> anyhow::Result<()>
+    where
+        S: AsyncWrite + AsyncWriteExt + Unpin,
+        P: Packet,
+    {
+        let bytes = {
+            let mut buf = P::PACKET_ID.to_be_bytes().to_vec();
+            let packet_body = packet.to_bytes(Default::default()).into_boxed_slice();
+            buf.extend_from_slice(&packet_body);
+            buf.into_boxed_slice()
+        };
+
+        let uncompressed_len = bytes.len();
+        if uncompressed_len > self.compression_threshold {
+            let compressed_packet = self.compress(&bytes)?;
+            let compressed_len = compressed_packet.len();
+
+            let header = PacketHeader::new(compressed_len as u32, uncompressed_len as u32);
+
+            header.write(stream).await?;
+            stream.write_all(&compressed_packet).await?;
+        } else {
+            let header = PacketHeader::new(uncompressed_len as u32, uncompressed_len as u32);
+
+            header.write(stream).await?;
+            stream.write_all(&bytes).await?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -125,11 +170,11 @@ mod tests {
     mod packet_compressor {
         use std::io::Write;
 
-        use crate::net::compressor::PacketCompressor;
+        use crate::net::{compressor::PacketCompressor, server::PacketHeader};
 
         use super::*;
         use flate2::{write::ZlibEncoder, Compression};
-        use tokio::io::BufReader;
+        use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 
         #[tokio::test]
         async fn read_header() {
@@ -221,6 +266,25 @@ mod tests {
                 bincode::deserialize::<Chunk>(anon_packet.bytes.as_ref()).unwrap();
 
             assert_eq!(chunk, deserialized_chunk);
+        }
+
+        #[tokio::test]
+        async fn write_header() {
+            for compr_len in 0..256u32 {
+                for decompr_len in 0..256u32 {
+                    let mut buffer = Vec::<u8>::new();
+                    buffer.extend_from_slice(&compr_len.to_be_bytes());
+                    buffer.extend_from_slice(&decompr_len.to_be_bytes());
+
+                    let h1 = PacketHeader::new(compr_len, decompr_len);
+                    let mut write_buf = Vec::<u8>::new();
+                    let mut writer = BufWriter::new(&mut write_buf);
+                    h1.write(&mut writer).await.unwrap();
+                    writer.flush().await.unwrap();
+
+                    assert_eq!(buffer, write_buf);
+                }
+            }
         }
     }
 }
