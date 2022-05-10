@@ -20,51 +20,26 @@ pub type RequestId = u32;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct GeneratorResponseCode(u8);
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RequestRegisterGenerator {
-    name: String,
-    generator_id: GeneratorId,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RespondRegisterGenerator {
-    response_code: GeneratorResponseCode,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RequestGenerateChunk {
-    pos: IVec2,
-    request_id: RequestId,
-    generator_id: GeneratorId,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct RespondGenerateChunk {
-    request_id: RequestId,
-    chunk: Chunk,
-}
-
-pub trait Packet {
-    const PACKET_ID: u32;
-
+pub trait Packet
+where
+    Self: Sized,
+{
     fn to_bytes(&self) -> Vec<u8>;
-    fn from_bytes(bytes: Vec<u8>) -> Self;
+    fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self>;
 }
 
 trait BincodePacket
 where
-    Self: Serialize + DeserializeOwned + Packet,
+    Self: Serialize + DeserializeOwned,
 {
-    const PACKET_ID: u32;
-
     #[inline]
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bincode(&self) -> Vec<u8> {
         bincode::serialize(self).unwrap()
     }
 
     #[inline]
-    fn from_bytes(bytes: Vec<u8>) -> Self {
-        bincode::deserialize_from(bytes.as_slice()).unwrap()
+    fn from_bincode(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        Ok(bincode::deserialize_from(bytes.as_slice())?)
     }
 }
 
@@ -72,45 +47,43 @@ impl<'a, T> Packet for T
 where
     T: BincodePacket,
 {
-    const PACKET_ID: u32 = <Self as BincodePacket>::PACKET_ID;
-
     #[inline]
     fn to_bytes(&self) -> Vec<u8> {
-        <Self as BincodePacket>::to_bytes(self)
+        self.to_bincode()
     }
 
     #[inline]
-    fn from_bytes(bytes: Vec<u8>) -> Self {
-        <Self as BincodePacket>::from_bytes(bytes)
+    fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        Self::from_bincode(bytes).into()
     }
 }
 
-impl BincodePacket for RequestRegisterGenerator {
-    const PACKET_ID: u32 = 0x01;
+#[allow(dead_code)]
+#[derive(Serialize, Deserialize, Debug)]
+pub enum DownstreamSuite {
+    RequestRegisterGenerator {
+        name: String,
+        generator_id: GeneratorId,
+    },
+    RequestGenerateChunk {
+        pos: IVec2,
+        request_id: RequestId,
+        generator_id: GeneratorId,
+    },
 }
 
-impl BincodePacket for RespondRegisterGenerator {
-    const PACKET_ID: u32 = 0x02;
-}
-
-impl BincodePacket for RequestGenerateChunk {
-    const PACKET_ID: u32 = 0x03;
-}
-
-impl BincodePacket for RespondGenerateChunk {
-    const PACKET_ID: u32 = 0x04;
-}
+impl BincodePacket for DownstreamSuite {}
 
 #[allow(dead_code)]
-#[derive(Debug)]
-pub enum DownstreamPacket {
-    RequestRegisterGenerator(RequestRegisterGenerator),
-    RequestGenerateChunk(RequestGenerateChunk),
+#[derive(Serialize, Deserialize, Debug)]
+pub enum UpstreamSuite {
+    RespondRegisterGenerator {
+        response_code: GeneratorResponseCode,
+    },
+    RespondGenerateChunk {
+        request_id: RequestId,
+        chunk: Chunk,
+    },
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-pub enum UpstreamPacket {
-    RespondRegisterGenerator(RespondRegisterGenerator),
-    RespondGenerateChunk(RespondGenerateChunk),
-}
+impl BincodePacket for UpstreamSuite {}
