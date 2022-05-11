@@ -24,8 +24,8 @@ pub trait Packet
 where
     Self: Sized,
 {
-    fn to_bytes(&self) -> Vec<u8>;
-    fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self>;
+    fn to_bytes(&self) -> Box<[u8]>;
+    fn from_bytes<S: AsRef<[u8]>>(bytes: S) -> anyhow::Result<Self>;
 }
 
 trait BincodePacket
@@ -33,13 +33,13 @@ where
     Self: Serialize + DeserializeOwned,
 {
     #[inline]
-    fn to_bincode(&self) -> Vec<u8> {
-        bincode::serialize(self).unwrap()
+    fn to_bincode(&self) -> Box<[u8]> {
+        bincode::serialize(self).unwrap().into()
     }
 
     #[inline]
-    fn from_bincode(bytes: Vec<u8>) -> anyhow::Result<Self> {
-        Ok(bincode::deserialize_from(bytes.as_slice())?)
+    fn from_bincode<T: AsRef<[u8]>>(bytes: T) -> anyhow::Result<Self> {
+        Ok(bincode::deserialize_from(bytes.as_ref())?)
     }
 }
 
@@ -48,12 +48,12 @@ where
     T: BincodePacket,
 {
     #[inline]
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self) -> Box<[u8]> {
         self.to_bincode()
     }
 
     #[inline]
-    fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
+    fn from_bytes<S: AsRef<[u8]>>(bytes: S) -> anyhow::Result<Self> {
         Self::from_bincode(bytes)
     }
 }

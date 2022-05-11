@@ -11,8 +11,9 @@ pub struct PacketCompressor {
     compression_level: Compression,
 }
 
+#[non_exhaustive]
 #[derive(thiserror::Error, Debug)]
-enum PacketReadingError {
+pub(super) enum PacketReadingError {
     #[error("packet claimed to be {0} bytes long uncompressed, but was actually {1}")]
     BadDecompressedLength(usize, usize),
     #[error("attempted to read uncompressed packet with length {0} (below compression threshold), but the claimed decompressed length ({1}) was not equal")]
@@ -106,10 +107,13 @@ impl PacketCompressor {
         Ok(buf.into_boxed_slice())
     }
 
-    pub async fn write_packet<S>(&self, stream: &mut S, raw_packet: &[u8]) -> anyhow::Result<()>
+    pub async fn write_packet<S, T>(&self, stream: &mut S, raw_packet: T) -> anyhow::Result<()>
     where
         S: AsyncWrite + AsyncWriteExt + Unpin,
+        T: AsRef<[u8]>,
     {
+        let raw_packet = raw_packet.as_ref();
+
         let uncompressed_len = raw_packet.len();
         if uncompressed_len > self.compression_threshold {
             let compressed_packet = self.compress(raw_packet)?;
@@ -271,7 +275,7 @@ mod tests {
                 let packet_bytes = in_packet.to_bytes();
                 let mut writer = BufWriter::new(&mut buffer);
                 compressor
-                    .write_packet(&mut writer, packet_bytes.as_slice())
+                    .write_packet(&mut writer, packet_bytes.as_ref())
                     .await
                     .unwrap();
             }
