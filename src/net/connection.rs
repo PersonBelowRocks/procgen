@@ -1,4 +1,4 @@
-use std::{net::SocketAddrV4, sync::Arc};
+use std::net::SocketAddrV4;
 
 use tokio::io::BufReader;
 
@@ -28,7 +28,7 @@ where
     S: AsyncStream,
 {
     stream: BufReader<S>,
-    compressor: Arc<PacketCompressor>,
+    compressor: PacketCompressor,
     address: SocketAddrV4,
 }
 
@@ -36,7 +36,7 @@ impl<S> Connection<S>
 where
     S: AsyncStream + Unpin,
 {
-    pub(super) fn new(address: SocketAddrV4, stream: S, compressor: Arc<PacketCompressor>) -> Self {
+    pub(super) fn new(address: SocketAddrV4, stream: S, compressor: PacketCompressor) -> Self {
         let stream = BufReader::new(stream);
 
         Self {

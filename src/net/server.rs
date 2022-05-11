@@ -1,3 +1,4 @@
+use flate2::Compression;
 use std::{
     net::{SocketAddr, SocketAddrV4},
     sync::Arc,
@@ -11,6 +12,7 @@ use tokio::{
 use crate::generate::Generator;
 
 use super::{
+    compressor::PacketCompressor,
     connection::Connection,
     generator_manager::GeneratorManager,
     protocol::{GeneratorId, ProtocolVersion},
@@ -80,10 +82,14 @@ impl Server {
         let _reactor = PacketReactor::new(self.generator_manager.clone());
         let listener = self.listener.unwrap();
         let connections = self.connections.clone();
+        let compressor = PacketCompressor::new(
+            self.compression_threshold.unwrap_or(128),
+            Compression::best(),
+        );
 
         tokio::spawn(async move {
             loop {
-                if let Some(connection) = listener.accept_incoming().await {
+                if let Ok(connection) = listener.accept_with_compressor(compressor.clone()).await {
                     let connection = Arc::new(connection);
 
                     connections.write().await.push(connection.clone());
@@ -172,14 +178,17 @@ impl Listener {
         Self { inner }
     }
 
-    async fn accept_incoming(&self) -> Option<Connection<TcpStream>> {
-        let (stream, addr) = self.inner.accept().await.ok()?;
+    async fn accept_with_compressor(
+        &self,
+        compressor: PacketCompressor,
+    ) -> anyhow::Result<Connection<TcpStream>> {
+        let (stream, addr) = self.inner.accept().await?;
 
         let addr = match addr {
             SocketAddr::V4(a) => a,
-            _ => unreachable!(),
+            _ => unreachable!(), // As long as the listener is an IPv4 listener we'll never reach this.
         };
-        todo!()
-        // Some(Connection::new(addr, stream))
+
+        Ok(Connection::new(addr, stream, compressor))
     }
 }

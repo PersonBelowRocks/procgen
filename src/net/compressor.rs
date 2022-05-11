@@ -5,7 +5,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::server::PacketHeader;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PacketCompressor {
     compression_threshold: usize,
     compression_level: Compression,
