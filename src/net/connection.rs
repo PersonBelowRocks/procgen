@@ -1,10 +1,10 @@
 use std::{net::SocketAddrV4, sync::Arc};
 
-use tokio::{io::BufReader, sync::RwLockWriteGuard};
+use tokio::io::BufReader;
 
 use super::{
     compressor::PacketCompressor,
-    protocol::{DownstreamPacket, Packet, RequestGenerateChunk, RequestRegisterGenerator},
+    protocol::{DownstreamSuite, Packet, UpstreamSuite},
     server::AsyncStream,
 };
 
@@ -37,11 +37,11 @@ where
         self.address
     }
 
-    pub(super) async fn read_packet(&mut self) -> anyhow::Result<DownstreamPacket> {
+    pub(super) async fn read_packet(&mut self) -> anyhow::Result<UpstreamSuite> {
         todo!()
     }
 
-    pub(super) async fn write_packet(&mut self) {
+    pub(super) async fn write_packet(&mut self, packet: DownstreamSuite) {
         todo!()
     }
 }

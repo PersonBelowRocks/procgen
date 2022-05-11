@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{
-    io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::RwLock,
 };
@@ -155,12 +155,6 @@ impl PacketHeader {
 
         Ok(Self::new(compr_len, decompr_len))
     }
-}
-
-#[derive(Debug)]
-pub struct AnonymousPacket {
-    pub id: u32,
-    pub bytes: Box<[u8]>,
 }
 
 /// Convenience trait implemented for all types that are [`AsyncRead`] + [`AsyncReadExt`] + [`AsyncWrite`] + [`AsyncWriteExt`].

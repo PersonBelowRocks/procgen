@@ -17,7 +17,7 @@ impl Default for ProtocolVersion {
 pub type GeneratorId = u32;
 pub type RequestId = u32;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct GeneratorResponseCode(u8);
 
 pub trait Packet
@@ -54,13 +54,13 @@ where
 
     #[inline]
     fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
-        Self::from_bincode(bytes).into()
+        Self::from_bincode(bytes)
     }
 }
 
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug)]
-pub enum DownstreamSuite {
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum UpstreamSuite {
     RequestRegisterGenerator {
         name: String,
         generator_id: GeneratorId,
@@ -72,11 +72,11 @@ pub enum DownstreamSuite {
     },
 }
 
-impl BincodePacket for DownstreamSuite {}
+impl BincodePacket for UpstreamSuite {}
 
 #[allow(dead_code)]
-#[derive(Serialize, Deserialize, Debug)]
-pub enum UpstreamSuite {
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+pub enum DownstreamSuite {
     RespondRegisterGenerator {
         response_code: GeneratorResponseCode,
     },
@@ -86,4 +86,4 @@ pub enum UpstreamSuite {
     },
 }
 
-impl BincodePacket for UpstreamSuite {}
+impl BincodePacket for DownstreamSuite {}
