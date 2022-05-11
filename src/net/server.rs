@@ -88,14 +88,18 @@ impl Server {
         );
 
         tokio::spawn(async move {
+            log::debug!("entering main loop...");
             loop {
-                if let Ok(connection) = listener.accept_with_compressor(compressor.clone()).await {
+                let incoming = listener.accept_with_compressor(compressor.clone()).await;
+                if let Ok(connection) = incoming {
                     let connection = Arc::new(connection);
 
                     connections.write().await.push(connection.clone());
                     tokio::spawn(async move {
-                        dbg!(connection.address());
+                        log::debug!("Received connection from '{}'", connection.address());
                     });
+                } else if let Err(error) = incoming {
+                    log::error!("Error accepting connection: {}", error);
                 }
             }
         });

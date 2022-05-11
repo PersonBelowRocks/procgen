@@ -11,9 +11,12 @@ mod volume;
 async fn main() {
     env_logger::init();
 
-    let _server = net::server::Server::new()
+    let mut server = net::server::Server::new()
         .with_version(net::protocol::ProtocolVersion::V1)
         .with_compression_threshold(256);
+
+    server.bind("0.0.0.0:4321".parse().unwrap()).await.unwrap();
+    server.run().await.unwrap();
 }
 
 #[cfg(test)]
