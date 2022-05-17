@@ -9,20 +9,20 @@ use tokio::{
     sync::RwLock,
 };
 
-use crate::generate::Generator;
+use crate::generate::ChunkGenerator;
 
 use super::{
     compressor::PacketCompressor,
     connection::Connection,
-    generator_manager::GeneratorManager,
     protocol::{GeneratorId, ProtocolVersion},
+    reactor::PacketReactor,
 };
 
 pub struct Server {
     reactor: Option<()>,
     listener: Option<Arc<Listener>>,
     connections: Arc<RwLock<Vec<Arc<Connection<TcpStream>>>>>,
-    generator_manager: Arc<RwLock<GeneratorManager>>,
+    generator_manager: (),
     version: ProtocolVersion,
     compression_threshold: Option<usize>,
     interrupt: bool,
@@ -43,7 +43,7 @@ impl Server {
             listener: None,
             version: Default::default(),
             compression_threshold: None,
-            generator_manager: Arc::new(RwLock::new(GeneratorManager::new())),
+            generator_manager: (),
             interrupt: false,
         }
     }
@@ -55,15 +55,6 @@ impl Server {
 
     pub fn with_compression_threshold(mut self, threshold: usize) -> Self {
         self.compression_threshold = Some(threshold);
-        self
-    }
-
-    pub fn with_generator<T: Generator + 'static>(self, id: GeneratorId, generator: T) -> Self {
-        let generator_manager = self.generator_manager.clone();
-        generator_manager
-            .blocking_write()
-            .add_generator(id, generator)
-            .unwrap();
         self
     }
 
@@ -79,7 +70,7 @@ impl Server {
             return Err(ServerError::AddressNotBound.into());
         }
 
-        let _reactor = PacketReactor::new(self.generator_manager.clone());
+        let _reactor = PacketReactor::new(self.generator_manager);
         let listener = self.listener.unwrap();
         let connections = self.connections.clone();
         let compressor = PacketCompressor::new(
@@ -111,16 +102,6 @@ impl Server {
         }
 
         Ok(())
-    }
-}
-
-struct PacketReactor {
-    generator_manager: Arc<RwLock<GeneratorManager>>,
-}
-
-impl PacketReactor {
-    pub fn new(generator_manager: Arc<RwLock<GeneratorManager>>) -> Self {
-        Self { generator_manager }
     }
 }
 

@@ -1,211 +1,240 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    future::Future,
+    ops::{Bound, Range, RangeBounds},
+    pin::Pin,
+    task,
+};
 
+use anyhow::Result;
 use threadpool::ThreadPool;
-use tokio::sync::oneshot::Receiver;
+use tokio::sync::oneshot;
 
-use crate::{chunk::Chunk, generate::Generator};
+use crate::{
+    chunk::{Chunk, IVec2},
+    generate::{ChunkGenerator, HasGeneratorId},
+};
 
-use super::protocol::{GeneratorId, RequestId};
-
-pub(super) struct GeneratorManager {
-    thread_pool: ThreadPool,
-    generators: HashMap<GeneratorId, Arc<dyn Generator>>,
-    requests: Vec<Receiver<GenerationReport>>,
+#[derive(Debug)]
+pub struct GeneratorArgs {
+    pos: IVec2,
+    y_bounds: Range<i32>,
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum GeneratorError {
-    #[error("no generator found with that id")]
-    NoSuchGenerator,
-    #[error("attempted to add generator with ID that already exists")]
-    GeneratorAlreadyExists,
+impl GeneratorArgs {
+    pub fn new<T: RangeBounds<i32>>(pos: IVec2, vertical_bounds: T) -> Self {
+        let start = match vertical_bounds.start_bound() {
+            Bound::Unbounded => panic!("range cannot be unbounded"),
+            Bound::Excluded(&n) => n + 1,
+            Bound::Included(&n) => n,
+        };
+
+        let end = match vertical_bounds.end_bound() {
+            Bound::Unbounded => panic!("range cannot be unbounded"),
+            Bound::Excluded(&n) => n,
+            Bound::Included(&n) => n + 1,
+        };
+
+        assert!(start < end, "bound start must be smaller than bound end");
+
+        Self {
+            pos,
+            y_bounds: start..end,
+        }
+    }
+
+    pub fn bounds(&self) -> Range<i32> {
+        self.y_bounds.clone()
+    }
+
+    pub fn max_y(&self) -> i32 {
+        std::cmp::max(self.bounds().start, self.bounds().end)
+    }
+
+    pub fn min_y(&self) -> i32 {
+        std::cmp::min(self.bounds().start, self.bounds().end)
+    }
+
+    pub fn pos(&self) -> IVec2 {
+        self.pos
+    }
+}
+
+#[derive(Clone, Copy, Hash, Debug)]
+pub struct GenerationId(u32);
+
+#[async_trait::async_trait]
+pub trait GenerationHandle {
+    async fn join(self) -> Result<Chunk>;
+}
+
+pub trait GeneratorExecutor {
+    type Handle: GenerationHandle;
+    fn is_parallel(&self) -> bool;
+    fn submit(
+        &self,
+        generator: &'static dyn ChunkGenerator,
+        args: GeneratorArgs,
+    ) -> Result<Self::Handle>;
 }
 
 #[derive(Debug)]
-pub struct GenerationReport {
-    request_id: RequestId,
-    chunk: Chunk,
+pub struct ParallelExecutor {
+    pool: ThreadPool,
 }
 
-#[allow(dead_code)]
-impl GenerationReport {
-    fn new(request_id: RequestId, chunk: Chunk) -> Self {
-        Self { request_id, chunk }
-    }
+#[derive(Debug)]
+pub struct ParallelExecutorGenerationHandle {
+    rx: oneshot::Receiver<Result<Chunk>>,
+}
 
-    fn request_id(&self) -> RequestId {
-        self.request_id
-    }
-
-    fn chunk(&self) -> &Chunk {
-        &self.chunk
-    }
-
-    fn into_chunk(self) -> Chunk {
-        self.into()
+#[async_trait::async_trait]
+impl GenerationHandle for ParallelExecutorGenerationHandle {
+    async fn join(self) -> Result<Chunk> {
+        self.rx.await.unwrap()
     }
 }
 
-impl From<GenerationReport> for Chunk {
-    fn from(report: GenerationReport) -> Self {
-        report.chunk
+impl ParallelExecutorGenerationHandle {
+    fn new(rx: oneshot::Receiver<Result<Chunk>>) -> Self {
+        Self { rx }
     }
 }
 
-pub struct GenerationReportIterator {
-    reports: Vec<GenerationReport>,
-}
+impl GeneratorExecutor for ParallelExecutor {
+    type Handle = ParallelExecutorGenerationHandle;
 
-impl GenerationReportIterator {
-    fn new(reports: Vec<GenerationReport>) -> Self {
-        Self { reports }
+    fn is_parallel(&self) -> bool {
+        true
+    }
+
+    fn submit(
+        &self,
+        generator: &'static dyn ChunkGenerator,
+        args: GeneratorArgs,
+    ) -> Result<Self::Handle> {
+        let (tx, rx) = oneshot::channel::<Result<Chunk>>();
+
+        self.pool.execute(move || {
+            if range_contains_range_inclusive(&generator.bounds(), &args.bounds()) {
+                tx.send({
+                    let chunk_res = Chunk::try_new(
+                        args.pos(),
+                        args.max_y(),
+                        args.min_y(),
+                        generator.default_id(),
+                    );
+
+                    if let Some(mut chunk) = chunk_res {
+                        generator.fill_chunk(&mut chunk);
+                        Ok(chunk)
+                    } else {
+                        Err(anyhow::anyhow!("failed to initialize chunk"))
+                    }
+                })
+                .unwrap();
+            } else {
+                tx.send(Err(anyhow::anyhow!(
+                    "generator does not support generating chunks of requested vertical size"
+                )))
+                .unwrap();
+            }
+        });
+
+        Ok(ParallelExecutorGenerationHandle::new(rx))
     }
 }
 
-impl IntoIterator for GenerationReportIterator {
-    type Item = GenerationReport;
-    type IntoIter = <Vec<Self::Item> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.reports.into_iter()
-    }
-}
-
-#[allow(dead_code)]
-impl GeneratorManager {
+impl ParallelExecutor {
     pub fn new() -> Self {
-        let thread_pool = threadpool::Builder::new()
-            .thread_name("generator-worker".into())
-            .build(); // TODO: number of threads should be configurable
-
         Self {
-            thread_pool,
-            requests: Vec::new(),
+            pool: ThreadPool::default(),
+        }
+    }
+}
+
+pub type GeneratorId = u32;
+
+pub struct GeneratorManager<Exec: GeneratorExecutor> {
+    executor: Exec,
+    generators: HashMap<GeneratorId, &'static dyn ChunkGenerator>,
+}
+
+impl<Exec: GeneratorExecutor> std::fmt::Debug for GeneratorManager<Exec> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GeneratorManager {{")?;
+        write!(
+            f,
+            "    executor: parallel: {},",
+            self.executor.is_parallel()
+        )?;
+        write!(f, "    generators: {},", self.generators.len())?;
+        write!(f, "}}")
+    }
+}
+
+#[allow(dead_code)]
+impl<Exec: GeneratorExecutor> GeneratorManager<Exec> {
+    #[inline]
+    pub fn new(executor: Exec) -> Self {
+        Self {
+            executor,
             generators: HashMap::new(),
         }
     }
 
-    pub fn add_generator<T: Generator + 'static>(
-        &mut self,
-        generator_id: GeneratorId,
-        gen: T,
-    ) -> anyhow::Result<()> {
-        if self.generators.contains_key(&generator_id) {
-            return Err(GeneratorError::GeneratorAlreadyExists.into());
-        }
-
-        self.generators.insert(generator_id, Arc::new(gen));
-
-        Ok(())
-    }
-
-    pub fn submit_chunk(
-        &mut self,
-        generator_id: GeneratorId,
-        request_id: RequestId,
-        mut chunk: Chunk,
-    ) -> anyhow::Result<()> {
-        let generator = self
-            .generators
-            .get(&generator_id)
-            .cloned()
-            .ok_or(GeneratorError::NoSuchGenerator)?;
-
-        let (tx, rx) = tokio::sync::oneshot::channel::<GenerationReport>();
-        self.requests.push(rx);
-
-        self.thread_pool.execute(move || {
-            generator.fill_chunk(&mut chunk);
-            tx.send(GenerationReport::new(request_id, chunk)).unwrap();
-        });
-
-        Ok(())
-    }
-
-    pub fn get_chunks(&mut self) -> Option<GenerationReportIterator> {
-        let mut reports = Vec::new();
-        self.requests = self
-            .requests
-            .drain(..)
-            .filter_map(|mut rx| {
-                if let Ok(report) = rx.try_recv() {
-                    reports.push(report);
-                    None
-                } else {
-                    Some(rx)
-                }
-            })
-            .collect::<Vec<_>>();
-
-        if reports.is_empty() {
-            None
+    #[inline]
+    pub fn add_generator<G>(&mut self, generator: G) -> Result<()>
+    where
+        G: ChunkGenerator + HasGeneratorId + 'static,
+    {
+        if let Entry::Vacant(e) = self.generators.entry(<G as HasGeneratorId>::GENERATOR_ID) {
+            e.insert(Box::leak(Box::new(generator)));
+            Ok(())
         } else {
-            Some(GenerationReportIterator::new(reports))
+            anyhow::bail!("generator with that ID already exists")
         }
     }
+
+    #[inline]
+    pub fn submit_chunk(
+        &self,
+        id: GeneratorId,
+        args: GeneratorArgs,
+    ) -> Option<<Exec as GeneratorExecutor>::Handle> {
+        let generator = *self.generators.get(&id)?;
+
+        let handle = self.executor.submit(generator, args).unwrap();
+        Some(handle)
+    }
+}
+
+#[inline]
+fn range_contains_range_inclusive<T>(container: &Range<T>, contained: &Range<T>) -> bool
+where
+    T: Copy + Ord,
+{
+    use std::cmp::{max, min};
+
+    let ctr = container;
+    let ctd = contained;
+
+    max(ctr.start, ctr.end) >= max(ctd.start, ctd.end)
+        && min(ctr.start, ctr.end) <= min(ctd.start, ctd.end)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        block::BlockId,
-        chunk::{Chunk, CHUNK_SECTION_SIZE},
-        generate::Generator,
-        net::protocol::{GeneratorId, RequestId},
-    };
-
-    use super::*;
-
-    fn example_chunk() -> Chunk {
-        Chunk::try_new(na::vector![2, 2], 320, -64, BlockId::from(0)).unwrap()
-    }
+    use super::range_contains_range_inclusive;
 
     #[test]
-    fn generator_manager() {
-        struct MyGenerator;
-
-        impl Generator for MyGenerator {
-            fn fill_chunk(&self, chunk: &mut Chunk) {
-                for x in 0..CHUNK_SECTION_SIZE as i32 {
-                    for z in 0..CHUNK_SECTION_SIZE as i32 {
-                        chunk
-                            .set(na::vector![x, chunk.min_y(), z], 42.into())
-                            .unwrap();
-                    }
-                }
-            }
-        }
-
-        const GENERATOR_ID: GeneratorId = 100;
-        const REQUEST_ID: RequestId = 54;
-
-        let mut manager = GeneratorManager::new();
-        manager.add_generator(GENERATOR_ID, MyGenerator).unwrap();
-        manager
-            .submit_chunk(GENERATOR_ID, REQUEST_ID, example_chunk())
-            .unwrap();
-
-        loop {
-            if let Some(chunks_iter) = manager.get_chunks() {
-                let mut chunks = chunks_iter.into_iter().collect::<Vec<_>>();
-
-                assert_eq!(chunks.len(), 1);
-
-                let only = chunks.pop().unwrap();
-
-                assert_eq!(only.request_id(), REQUEST_ID);
-
-                for x in 0..CHUNK_SECTION_SIZE as i32 {
-                    for z in 0..CHUNK_SECTION_SIZE as i32 {
-                        let slot = only
-                            .chunk()
-                            .get(na::vector![x, only.chunk().min_y(), z])
-                            .unwrap();
-                        assert_eq!(slot, &42.into())
-                    }
-                }
-                return;
-            }
-        }
+    fn test_range_contains_range_inclusive() {
+        assert!(range_contains_range_inclusive(&(-5..5), &(-5..4)));
+        assert!(!range_contains_range_inclusive(&(-5..4), &(-5..5)));
+        assert!(range_contains_range_inclusive(&(-5..5), &(-5..5)));
+        assert!(range_contains_range_inclusive(&(-5..5), &(-4..5)));
+        assert!(!range_contains_range_inclusive(&(-5..5), &(-6..5)));
+        assert!(!range_contains_range_inclusive(&(-4..4), &(-5..4)));
     }
 }
