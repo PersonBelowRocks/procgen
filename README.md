@@ -12,4 +12,11 @@ Reasons being:
   fearless concurrency, and zero-cost abstractions) is the ergonomics of the language, especially when it comes to math! The type system really
   helps this with crates like [num-traits](https://crates.io/crates/num-traits), and there's also the lovely [nalgebra](https://crates.io/crates/nalgebra)
   crate for linear algebra which I find quite satisfying too.
-  
+
+
+# ECS Branch
+This branch is going to be using an [ECS](https://crates.io/crates/bevy_ecs) for the generator server. This might be a bad idea but using an ECS would allow
+for splitting up the logic in a lot neater ways, and probably completely separating any networking stuff from procedural generation stuff (which would make everything a lot
+easier to maintain).
+
+This branch is also going to be using a [little crate](https://github.com/PersonBelowRocks/volume) for working with 3D voxel data.
