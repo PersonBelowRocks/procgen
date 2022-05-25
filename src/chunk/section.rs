@@ -1,8 +1,8 @@
 use vol::prelude::*;
 
-use crate::block::BlockId;
+use crate::{block::BlockId, util::IVec3};
 
-use super::basic::{IVec3, CHUNK_SECTION_CORNER, CHUNK_SIZE};
+use super::basic::CHUNK_SECTION_CORNER;
 
 pub struct ChunkSection {
     default: BlockId,

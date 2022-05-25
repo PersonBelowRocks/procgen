@@ -1,6 +1,10 @@
 use vol::prelude::*;
 
-use crate::block::BlockId;
+use crate::{
+    block::BlockId,
+    generation::GenerationArgs,
+    util::{IVec2, IVec3},
+};
 
 use super::section::ChunkSection;
 
@@ -10,9 +14,6 @@ pub const CHUNK_SIZE: i32 = 16;
 /// Corner of a chunk section.
 /// This constant is here for ergonomics so you can do add it to a chunk section's position and get the position of the opposite corner.
 pub const CHUNK_SECTION_CORNER: IVec3 = na::vector![CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE];
-
-pub type IVec2 = na::Vector2<i32>;
-pub type IVec3 = na::Vector3<i32>;
 
 fn chunk_sections_for_height(height: i32) -> usize {
     debug_assert!(height >= 0); // we can't have chunks with a negative height
@@ -50,6 +51,10 @@ impl Chunk {
             sections,
             bounding_box,
         }
+    }
+
+    pub fn from_args(args: GenerationArgs) -> Self {
+        Self::new(args.default, args.pos, args.min_height, args.max_height)
     }
 
     #[inline]

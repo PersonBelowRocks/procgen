@@ -1,6 +1,6 @@
 use crate::{chunk::Chunk, generation::GenerationArgs};
 
-use super::RequestIdent;
+use super::{components::GeneratorName, RequestIdent};
 
 pub struct FinishedGenerateChunkEvent {
     chunk: Chunk,
@@ -14,13 +14,13 @@ impl FinishedGenerateChunkEvent {
 }
 
 pub struct RequestGenerateChunkEvent {
-    name: String,
-    request: RequestIdent,
-    args: GenerationArgs,
+    pub name: GeneratorName,
+    pub request: RequestIdent,
+    pub args: GenerationArgs,
 }
 
 impl RequestGenerateChunkEvent {
-    pub fn new(name: String, request: RequestIdent, args: GenerationArgs) -> Self {
+    pub fn new(name: GeneratorName, request: RequestIdent, args: GenerationArgs) -> Self {
         Self {
             name,
             request,
