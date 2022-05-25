@@ -2,6 +2,7 @@
 
 mod components;
 mod events;
+mod net;
 mod resources;
 mod systems;
 
