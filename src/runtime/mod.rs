@@ -13,7 +13,9 @@ use crate::generation::ChunkGenerator;
 use self::components::{Generator, GeneratorName};
 
 mod labels {
+    pub(super) static PRE_TICK: &str = "STAGE_PRE_TICK";
     pub(super) static TICK: &str = "STAGE_TICK";
+    pub(super) static POST_TICK: &str = "STAGE_POST_TICK";
     pub(super) static SETUP: &str = "STAGE_SETUP";
 }
 
@@ -44,7 +46,23 @@ pub struct GenRuntime {
 impl GenRuntime {
     pub fn new() -> Self {
         Self {
-            sched: { Schedule::default().with_stage(labels::TICK, SystemStage::parallel()) },
+            sched: {
+                let mut schedule = Schedule::default()
+                    // The PRE_TICK stage is where requests from clients are collected from the async background networking worker.
+                    // Requests will be processed in the next stage (TICK).
+                    .with_stage(labels::PRE_TICK, SystemStage::parallel())
+                    // The TICK stage is where chunks are submitted for generation to the async background thread pool.
+                    // Generators will run in this pool alongside the ECS runtime, and will be collected when available.
+                    .with_stage_after(labels::PRE_TICK, labels::TICK, SystemStage::parallel())
+                    // The POST_TICK stage is where finished chunks are going to be submitted to the async background networking worker.
+                    // Here they will be sent out to the clients that requested them.
+                    .with_stage_after(labels::TICK, labels::POST_TICK, SystemStage::parallel());
+
+                schedule.add_system_to_stage(labels::TICK, systems::generate_chunks);
+                schedule.add_system_to_stage(labels::POST_TICK, systems::collect_chunks);
+
+                schedule
+            },
             world: { World::new() },
             async_rt: { Builder::new_multi_thread().enable_all().build().unwrap() },
         }
