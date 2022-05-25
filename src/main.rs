@@ -4,6 +4,7 @@ extern crate volume as vol;
 
 mod block;
 mod chunk;
+mod runtime;
 mod util;
 
 #[tokio::main]
