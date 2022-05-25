@@ -1,6 +1,9 @@
 use ecs::prelude::*;
 
-use crate::generation::{ChunkGenerator, DynGenVTable};
+use crate::{
+    chunk::Chunk,
+    generation::{ChunkGenerator, DynGenVTable},
+};
 
 #[derive(Component)]
 pub struct Generator(DynGenVTable);
@@ -12,7 +15,7 @@ impl<G: ChunkGenerator + 'static> From<G> for Generator {
 }
 
 impl Generator {
-    pub fn generate(&self, chunk: &mut ()) -> anyhow::Result<()> {
+    pub fn generate(&self, chunk: &mut Chunk) -> anyhow::Result<()> {
         self.0.generate(chunk)
     }
 }

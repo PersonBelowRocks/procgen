@@ -26,7 +26,7 @@ version = "1.0"
 features = ["derive"]
 
 [dependencies.nalgebra]
-version = "0.30.1"
+version = "0.31"
 features = ["serde-serialize"]
 
 [dependencies.volume]
