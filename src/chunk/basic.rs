@@ -52,6 +52,7 @@ impl Chunk {
         }
     }
 
+    #[inline]
     pub fn from_args(args: GenerationArgs) -> Self {
         Self::new(args.default, args.pos, args.min_height, args.max_height)
     }
@@ -70,7 +71,7 @@ impl Chunk {
 impl Volume for Chunk {
     type Item = BlockId;
 
-    #[inline(always)]
+    #[inline]
     fn ls_get(&self, idx: [u64; 3]) -> Option<&Self::Item> {
         // This is basically the index of the section in self.sections
         let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
@@ -83,7 +84,7 @@ impl Volume for Chunk {
         section.ls_get([idx[0], sectionspace_y, idx[2]])
     }
 
-    #[inline(always)]
+    #[inline]
     fn ls_get_mut(&mut self, idx: [u64; 3]) -> Option<&mut Self::Item> {
         // See Self::ls_get above for an explanation of these.
         let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
@@ -93,6 +94,7 @@ impl Volume for Chunk {
         section.ls_get_mut([idx[0], sectionspace_y, idx[2]])
     }
 
+    #[inline]
     fn bounding_box(&self) -> BoundingBox {
         self.bounding_box
     }

@@ -13,6 +13,7 @@ pub struct ChunkSection {
 }
 
 impl ChunkSection {
+    #[inline]
     pub fn new_uninitialized(default: BlockId) -> Self {
         Self {
             default,
@@ -20,6 +21,7 @@ impl ChunkSection {
         }
     }
 
+    #[inline]
     pub fn new_initialized(default: BlockId) -> Self {
         let mut new = Self::new_uninitialized(default);
         new.initialize();
@@ -46,7 +48,7 @@ impl ChunkSection {
 impl Volume for ChunkSection {
     type Item = BlockId;
 
-    #[inline(always)]
+    #[inline]
     fn ls_get(&self, idx: [u64; 3]) -> Option<&Self::Item> {
         match self.volume {
             Some(ref vol) => vol.ls_get(idx),
@@ -60,7 +62,7 @@ impl Volume for ChunkSection {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn ls_get_mut(&mut self, idx: [u64; 3]) -> Option<&mut Self::Item> {
         match self.volume {
             Some(ref mut vol) => vol.ls_get_mut(idx),
@@ -83,7 +85,7 @@ impl Volume for ChunkSection {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn bounding_box(&self) -> BoundingBox {
         if let Some(ref vol) = self.volume {
             // We'll grab the existing bounding box if it exists due to performance reasons.
