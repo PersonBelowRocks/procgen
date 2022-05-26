@@ -50,7 +50,13 @@ impl Volume for ChunkSection {
     fn ls_get(&self, idx: [u64; 3]) -> Option<&Self::Item> {
         match self.volume {
             Some(ref vol) => vol.ls_get(idx),
-            None => Some(&self.default),
+            None => {
+                if self.contains(idx) {
+                    Some(&self.default)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -59,16 +65,20 @@ impl Volume for ChunkSection {
         match self.volume {
             Some(ref mut vol) => vol.ls_get_mut(idx),
             None => {
-                // We're gonna initialize the section here for 2 reasons:
-                // - We need to return a mutable reference which cannot be owned by the function, and returning a mutable reference
-                //   to our own default BlockId (like Self::ls_get) would be incredibly dumb, because then the caller could mutate our default which could be
-                //   reused in the future, leading to unpredictable behaviour and horrific bugs.
-                //
-                // - The caller may have called this function by calling Volume::swap, in which case they (probably) want to swap whatever is at this index.
-                //   It's ergonomic and convenient for the caller if the section just initializes itself in that case, instead of panicking or
-                //   returning something stupid (see above), eliminating the need for a bunch of safeguards and sanity checks.
-                self.initialize();
-                self.ls_get_mut(idx)
+                if self.contains(idx) {
+                    // We're gonna initialize the section here for 2 reasons:
+                    // - We need to return a mutable reference which cannot be owned by the function, and returning a mutable reference
+                    //   to our own default BlockId (like Self::ls_get) would be incredibly dumb, because then the caller could mutate our default which could be
+                    //   reused in the future, leading to unpredictable behaviour and horrific bugs.
+                    //
+                    // - The caller may have called this function by calling Volume::swap, in which case they (probably) want to swap whatever is at this index.
+                    //   It's ergonomic and convenient for the caller if the section just initializes itself in that case, instead of panicking or
+                    //   returning something stupid (see above), eliminating the need for a bunch of safeguards and sanity checks.
+                    self.initialize();
+                    self.ls_get_mut(idx)
+                } else {
+                    None
+                }
             }
         }
     }
@@ -82,5 +92,41 @@ impl Volume for ChunkSection {
         } else {
             BoundingBox::new_origin(CHUNK_SECTION_CORNER.into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_section_indexing() {
+        const DEFAULT_ID: BlockId = BlockId::new(5);
+
+        let mut section = ChunkSection::new_uninitialized(DEFAULT_ID);
+
+        assert_eq!(section.get([7i32, 7, 7]), Some(&DEFAULT_ID));
+        assert_eq!(section.get([0i32, 0, 0]), Some(&DEFAULT_ID));
+        assert_eq!(section.get([16i32, 16, 16]), None);
+        assert_eq!(section.get([-1i32, -1, -1]), None);
+
+        assert_eq!(
+            section.swap([7i32, 7, 7], BlockId::new(42)),
+            Some(DEFAULT_ID)
+        );
+        assert_eq!(section.get([7i32, 7, 7]), Some(&BlockId::new(42)));
+    }
+
+    #[test]
+    fn chunk_section_bounds() {
+        const DEFAULT_ID: BlockId = BlockId::new(5);
+
+        let section = ChunkSection::new_uninitialized(DEFAULT_ID);
+
+        assert!(section.contains([0i32, 0, 0]));
+        assert!(section.contains([15i32, 15, 15]));
+
+        assert!(!section.contains([-1i32, -1, -1]));
+        assert!(!section.contains([16i32, 16, 16]));
     }
 }
