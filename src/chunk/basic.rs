@@ -35,9 +35,8 @@ impl Chunk {
             let capacity = chunk_sections_for_height((min_height - max_height).abs());
             let mut vec = Vec::with_capacity(capacity);
 
-            for cy in 0..capacity {
-                let pos = na::vector![pos.x, (cy as i32) * CHUNK_SIZE, pos.y];
-                vec.push(ChunkSection::new_uninitialized(default, pos));
+            for _ in 0..capacity {
+                vec.push(ChunkSection::new_uninitialized(default));
             }
 
             debug_assert!(vec.len() == capacity);

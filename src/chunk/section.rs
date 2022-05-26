@@ -1,28 +1,27 @@
 use vol::prelude::*;
 
-use crate::{block::BlockId, util::IVec3};
+use crate::block::BlockId;
 
 use super::basic::CHUNK_SECTION_CORNER;
 
+/// A 16x16x16 cube of voxels/blocks.
+#[derive(Debug)]
 pub struct ChunkSection {
     default: BlockId,
-    pos: IVec3, // TODO: should we bother giving sections a position? they're pretty much only used from within chunks anyways so we can do
-    // transformations and stuff there
     volume: Option<HeapVolume<BlockId>>, // TODO: this volume is allocated on the heap which takes a while,
                                          // finish the StackVolume implementation in the "volume" crate and use that instead!
 }
 
 impl ChunkSection {
-    pub fn new_uninitialized(default: BlockId, pos: IVec3) -> Self {
+    pub fn new_uninitialized(default: BlockId) -> Self {
         Self {
             default,
-            pos,
             volume: None,
         }
     }
 
-    pub fn new_initialized(default: BlockId, pos: IVec3) -> Self {
-        let mut new = Self::new_uninitialized(default, pos);
+    pub fn new_initialized(default: BlockId) -> Self {
+        let mut new = Self::new_uninitialized(default);
         new.initialize();
         new
     }
@@ -33,7 +32,7 @@ impl ChunkSection {
         if !self.is_initialized() {
             self.volume = Some(HeapVolume::new(
                 self.default,
-                self.pos..(self.pos + CHUNK_SECTION_CORNER),
+                BoundingBox::new_origin(CHUNK_SECTION_CORNER.into()),
             ));
         }
     }
@@ -81,7 +80,7 @@ impl Volume for ChunkSection {
             // BoundingBox::new has some logic in it that we might wanna avoid running multiple times.
             vol.bounding_box()
         } else {
-            BoundingBox::new(self.pos.into(), (self.pos + CHUNK_SECTION_CORNER).into())
+            BoundingBox::new_origin(CHUNK_SECTION_CORNER.into())
         }
     }
 }
