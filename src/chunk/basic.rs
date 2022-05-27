@@ -72,26 +72,28 @@ impl Volume for Chunk {
     type Item = BlockId;
 
     #[inline]
-    fn ls_get(&self, idx: [u64; 3]) -> Option<&Self::Item> {
-        // This is basically the index of the section in self.sections
-        let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
-        // This is the y position within the section. If idx[1] was for example 20,
-        // it would index into the section at self.sections[1] and get a block at Y=4 in that section's localspace.
-        // (so sectionspace_y == 4)
-        let sectionspace_y = idx[1] % CHUNK_SIZE as u64;
+    fn ls_get<Idx: VolumeIdx>(&self, idx: Idx) -> Option<&Self::Item> {
+        // // This is basically the index of the section in self.sections
+        // let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
+        // // This is the y position within the section. If idx[1] was for example 20,
+        // // it would index into the section at self.sections[1] and get a block at Y=4 in that section's localspace.
+        // // (so sectionspace_y == 4)
+        // let sectionspace_y = idx[1] % CHUNK_SIZE as u64;
 
-        let section = self.get_chunk_section(section_cy)?;
-        section.ls_get([idx[0], sectionspace_y, idx[2]])
+        // let section = self.get_chunk_section(section_cy)?;
+        // section.ls_get([idx[0], sectionspace_y, idx[2]])
+        todo!()
     }
 
     #[inline]
-    fn ls_get_mut(&mut self, idx: [u64; 3]) -> Option<&mut Self::Item> {
-        // See Self::ls_get above for an explanation of these.
-        let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
-        let sectionspace_y = idx[1] % CHUNK_SIZE as u64;
+    fn ls_get_mut<Idx: VolumeIdx>(&mut self, idx: Idx) -> Option<&mut Self::Item> {
+        // // See Self::ls_get above for an explanation of these.
+        // let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
+        // let sectionspace_y = idx[1] % CHUNK_SIZE as u64;
 
-        let section = self.get_mut_chunk_section(section_cy)?;
-        section.ls_get_mut([idx[0], sectionspace_y, idx[2]])
+        // let section = self.get_mut_chunk_section(section_cy)?;
+        // section.ls_get_mut([idx[0], sectionspace_y, idx[2]])
+        todo!()
     }
 
     #[inline]

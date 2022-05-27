@@ -49,7 +49,7 @@ impl Volume for ChunkSection {
     type Item = BlockId;
 
     #[inline]
-    fn ls_get(&self, idx: [u64; 3]) -> Option<&Self::Item> {
+    fn ls_get<Idx: VolumeIdx>(&self, idx: Idx) -> Option<&Self::Item> {
         match self.volume {
             Some(ref vol) => vol.ls_get(idx),
             None => {
@@ -63,7 +63,7 @@ impl Volume for ChunkSection {
     }
 
     #[inline]
-    fn ls_get_mut(&mut self, idx: [u64; 3]) -> Option<&mut Self::Item> {
+    fn ls_get_mut<Idx: VolumeIdx>(&mut self, idx: Idx) -> Option<&mut Self::Item> {
         match self.volume {
             Some(ref mut vol) => vol.ls_get_mut(idx),
             None => {
