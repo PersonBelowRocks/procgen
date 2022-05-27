@@ -66,6 +66,20 @@ impl Chunk {
     fn get_mut_chunk_section(&mut self, chunk_section_idx: usize) -> Option<&mut ChunkSection> {
         self.sections.get_mut(chunk_section_idx)
     }
+
+    /// Chunkspace access
+    #[inline]
+    fn cs_get<Idx: VolumeIdx>(&self, idx: Idx) -> Option<&<Self as Volume>::Item> {
+        let [x, y, z] = idx.array::<i64>()?;
+        self.ls_get([x, y - self.bounding_box().min()[1], z])
+    }
+
+    /// Mutable chunkspace access
+    #[inline]
+    fn cs_get_mut<Idx: VolumeIdx>(&mut self, idx: Idx) -> Option<&mut <Self as Volume>::Item> {
+        let [x, y, z] = idx.array::<i64>()?;
+        self.ls_get_mut([x, y - self.bounding_box().min()[1], z])
+    }
 }
 
 impl Volume for Chunk {
@@ -73,31 +87,72 @@ impl Volume for Chunk {
 
     #[inline]
     fn ls_get<Idx: VolumeIdx>(&self, idx: Idx) -> Option<&Self::Item> {
-        // // This is basically the index of the section in self.sections
-        // let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
-        // // This is the y position within the section. If idx[1] was for example 20,
-        // // it would index into the section at self.sections[1] and get a block at Y=4 in that section's localspace.
-        // // (so sectionspace_y == 4)
-        // let sectionspace_y = idx[1] % CHUNK_SIZE as u64;
+        let [x, y, z] = idx.array::<i32>()?;
 
-        // let section = self.get_chunk_section(section_cy)?;
-        // section.ls_get([idx[0], sectionspace_y, idx[2]])
-        todo!()
+        // This is the height/index of the chunk section containing the position provided.
+        let section_idx = y / CHUNK_SIZE;
+        // This is the position within that section corresponding to the position provided
+        // (i.e., in the section's localspace).
+        let sectionspace_y = y % CHUNK_SIZE;
+
+        let section = self.get_chunk_section(section_idx as usize)?;
+        section.ls_get([x, sectionspace_y, z])
     }
 
     #[inline]
     fn ls_get_mut<Idx: VolumeIdx>(&mut self, idx: Idx) -> Option<&mut Self::Item> {
-        // // See Self::ls_get above for an explanation of these.
-        // let section_cy = (idx[1] as usize) / CHUNK_SIZE as usize;
-        // let sectionspace_y = idx[1] % CHUNK_SIZE as u64;
+        let [x, y, z] = idx.array::<i32>()?;
 
-        // let section = self.get_mut_chunk_section(section_cy)?;
-        // section.ls_get_mut([idx[0], sectionspace_y, idx[2]])
-        todo!()
+        // This is the height/index of the chunk section containing the position provided.
+        let section_idx = y / CHUNK_SIZE;
+        // This is the position within that section corresponding to the position provided
+        // (i.e., in the section's localspace).
+        let sectionspace_y = y % CHUNK_SIZE;
+
+        let section = self.get_mut_chunk_section(section_idx as usize)?;
+        section.ls_get_mut([x, sectionspace_y, z])
     }
 
     #[inline]
     fn bounding_box(&self) -> BoundingBox {
         self.bounding_box
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chunk_indexing() {
+        const DEFAULT_ID: BlockId = BlockId::new(10);
+
+        let mut chunk = Chunk::new(DEFAULT_ID, na::vector![2, 2], -64, 320);
+
+        assert_eq!(chunk.get(na::vector![3i32, 3, 8]), None);
+        assert_eq!(
+            chunk.get(na::vector![3i32, 3, 8] + (na::vector![2, 0, 2] * CHUNK_SIZE)),
+            Some(&DEFAULT_ID)
+        );
+
+        assert_eq!(chunk.get(na::vector![u64::MAX, 0, 0]), None);
+        assert_eq!(chunk.get(na::vector![-100i32, 50, -10]), None);
+
+        assert_eq!(
+            chunk.swap(
+                na::vector![3i32, 3, 8] + (na::vector![2, 0, 2] * CHUNK_SIZE),
+                BlockId::new(42)
+            ),
+            Some(DEFAULT_ID)
+        );
+        assert_eq!(
+            chunk.get(na::vector![3i32, 3, 8] + (na::vector![2i32, 0, 2] * CHUNK_SIZE)),
+            Some(&BlockId::new(42))
+        );
+
+        assert_eq!(
+            chunk.cs_get(na::vector![3i32, 3, 8]),
+            Some(&BlockId::new(42))
+        );
     }
 }
