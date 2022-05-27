@@ -1023,7 +1023,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "volume"
 version = "0.1.0"
-source = "git+https://github.com/PersonBelowRocks/volume.git#fca463bc2ba2650f31456666e243d4eaedf181a1"
+source = "git+https://github.com/PersonBelowRocks/volume.git#b9545b99bcb7d1cbeecad7ce4c0f73c3383c3fda"
 dependencies = [
  "glam",
  "nalgebra",

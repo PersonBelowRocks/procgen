@@ -2,14 +2,18 @@ use vol::prelude::*;
 
 use crate::block::BlockId;
 
-use super::basic::CHUNK_SECTION_CORNER;
+use super::basic::{CHUNK_SECTION_CORNER, CHUNK_SIZE};
+
+const CHUNK_SIZE_USIZE: usize = CHUNK_SIZE as usize;
+
+type CubicVolume<const N: usize, T> = StackVolume<N, N, N, T>;
+type ChunkSectionStorage = CubicVolume<CHUNK_SIZE_USIZE, BlockId>;
 
 /// A 16x16x16 cube of voxels/blocks.
 #[derive(Debug)]
 pub struct ChunkSection {
     default: BlockId,
-    volume: Option<HeapVolume<BlockId>>, // TODO: this volume is allocated on the heap which takes a while,
-                                         // finish the StackVolume implementation in the "volume" crate and use that instead!
+    volume: Option<ChunkSectionStorage>,
 }
 
 impl ChunkSection {
@@ -32,10 +36,7 @@ impl ChunkSection {
     fn initialize(&mut self) {
         // Only do this if we're uninitialized so we avoid wiping any existing data.
         if !self.is_initialized() {
-            self.volume = Some(HeapVolume::new(
-                self.default,
-                BoundingBox::new_origin(CHUNK_SECTION_CORNER.into()),
-            ));
+            self.volume = Some(ChunkSectionStorage::filled(self.default));
         }
     }
 
