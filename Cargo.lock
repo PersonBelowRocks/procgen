@@ -1041,7 +1041,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "volume"
 version = "0.1.0"
-source = "git+https://github.com/PersonBelowRocks/volume.git#f3f6e4fc08811cef4b8c5da1c29fecc69f16ed04"
+source = "git+https://github.com/PersonBelowRocks/volume.git?branch=accessing-rework#5fde0c658bc4362ec4363cf9f25dbde83d4eec01"
 dependencies = [
  "glam",
  "nalgebra",
