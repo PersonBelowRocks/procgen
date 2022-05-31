@@ -30,7 +30,7 @@ pub trait DynChunkGenerator: Send + Sync {
 }
 
 impl<T: ChunkGenerator> DynChunkGenerator for T {
-    #[inline(always)]
+    #[inline]
     fn generate(&self, chunk: &mut Chunk) -> anyhow::Result<()> {
         <Self as ChunkGenerator>::generate(self, chunk)
     }
