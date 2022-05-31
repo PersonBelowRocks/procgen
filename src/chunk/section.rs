@@ -1,4 +1,4 @@
-use vol::prelude::*;
+use vol::builtins::*;
 
 use crate::block::BlockId;
 
@@ -10,7 +10,7 @@ type CubicVolume<const N: usize, T> = StackVolume<N, N, N, T>;
 type ChunkSectionStorage = CubicVolume<CHUNK_SIZE_USIZE, BlockId>;
 
 /// A 16x16x16 cube of voxels/blocks.
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct ChunkSection {
     default: BlockId,
     volume: Option<ChunkSectionStorage>,
@@ -46,56 +46,53 @@ impl ChunkSection {
     }
 }
 
+impl<Idx: VolumeIdx> VolumeAccess<Idx> for ChunkSection {
+    #[inline]
+    fn get(this: &Self, idx: Idx) -> Option<&Self::Item> {
+        match this.volume {
+            Some(ref v) => v.get(idx),
+            None => {
+                if this.contains(idx) {
+                    Some(&this.default)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn set(this: &mut Self, idx: Idx, item: Self::Item) {
+        if !this.is_initialized() {
+            this.initialize();
+            this.volume.as_mut().unwrap().set(idx, item);
+        } else {
+            this.volume.as_mut().unwrap().set(idx, item);
+        }
+    }
+
+    #[inline]
+    fn swap(this: &mut Self, idx: Idx, item: Self::Item) -> Option<Self::Item> {
+        if !this.is_initialized() {
+            this.initialize();
+            this.volume.as_mut().unwrap().swap(idx, item)
+        } else {
+            this.volume.as_mut().unwrap().swap(idx, item)
+        }
+    }
+
+    #[inline]
+    fn contains(_this: &Self, idx: Idx) -> bool {
+        if let Some([x, y, z]) = idx.array::<usize>() {
+            x < CHUNK_SIZE_USIZE && y < CHUNK_SIZE_USIZE && z < CHUNK_SIZE_USIZE
+        } else {
+            false
+        }
+    }
+}
+
 impl Volume for ChunkSection {
     type Item = BlockId;
-
-    #[inline]
-    fn ls_get<Idx: VolumeIdx>(&self, idx: Idx) -> Option<&Self::Item> {
-        match self.volume {
-            Some(ref vol) => vol.ls_get(idx),
-            None => {
-                if self.contains(idx) {
-                    Some(&self.default)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn ls_get_mut<Idx: VolumeIdx>(&mut self, idx: Idx) -> Option<&mut Self::Item> {
-        match self.volume {
-            Some(ref mut vol) => vol.ls_get_mut(idx),
-            None => {
-                if self.contains(idx) {
-                    // We're gonna initialize the section here for 2 reasons:
-                    // - We need to return a mutable reference which cannot be owned by the function, and returning a mutable reference
-                    //   to our own default BlockId (like Self::ls_get) would be incredibly dumb, because then the caller could mutate our default which could be
-                    //   reused in the future, leading to unpredictable behaviour and horrific bugs.
-                    //
-                    // - The caller may have called this function by calling Volume::swap, in which case they (probably) want to swap whatever is at this index.
-                    //   It's ergonomic and convenient for the caller if the section just initializes itself in that case, instead of panicking or
-                    //   returning something stupid (see above), eliminating the need for a bunch of safeguards and sanity checks.
-                    self.initialize();
-                    self.ls_get_mut(idx)
-                } else {
-                    None
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn bounding_box(&self) -> BoundingBox {
-        if let Some(ref vol) = self.volume {
-            // We'll grab the existing bounding box if it exists due to performance reasons.
-            // BoundingBox::new has some logic in it that we might wanna avoid running multiple times.
-            vol.bounding_box()
-        } else {
-            BoundingBox::new_origin(CHUNK_SECTION_CORNER.into())
-        }
-    }
 }
 
 #[cfg(test)]
