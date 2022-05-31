@@ -44,6 +44,11 @@ impl ChunkSection {
     pub fn is_initialized(&self) -> bool {
         self.volume.is_some()
     }
+
+    #[inline]
+    pub fn default_id(&self) -> BlockId {
+        self.default
+    }
 }
 
 impl<Idx: VolumeIdx> VolumeAccess<Idx> for ChunkSection {

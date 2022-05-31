@@ -1,4 +1,5 @@
 extern crate bevy_ecs as ecs;
+extern crate downcast_rs as dc;
 extern crate nalgebra as na;
 extern crate thiserror as te;
 extern crate volume as vol;

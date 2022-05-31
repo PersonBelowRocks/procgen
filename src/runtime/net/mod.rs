@@ -1,4 +1,9 @@
-use std::sync::mpsc::{self, Receiver, Sender};
+pub mod packets;
+
+use std::sync::{
+    mpsc::{self, Receiver, Sender},
+    Arc, Mutex,
+};
 
 /// Represents an incoming command/request from a client.
 pub(crate) enum NetInbound {}
@@ -6,15 +11,16 @@ pub(crate) enum NetInbound {}
 /// Represents an outbound command/request to a client.
 pub(crate) enum NetOutbound {}
 
+#[derive(Clone)]
 pub(crate) struct NetworkerHandle {
-    inbound: Receiver<NetInbound>,
+    inbound: Arc<Mutex<Receiver<NetInbound>>>,
     outbound: Sender<NetOutbound>,
 }
 
 impl NetworkerHandle {
     fn new(rx_inbound: Receiver<NetInbound>, tx_outbound: Sender<NetOutbound>) -> Self {
         Self {
-            inbound: rx_inbound,
+            inbound: Arc::new(Mutex::new(rx_inbound)),
             outbound: tx_outbound,
         }
     }
@@ -46,10 +52,35 @@ fn make_handles() -> (NetworkerHandle, InternalNetworkerHandle) {
 
 pub(crate) struct Networker {
     runtime: tokio::runtime::Runtime,
-    handle: NetworkerHandle,
+    handle: Option<NetworkerHandle>,
 }
 
-async fn run(o: Receiver<NetOutbound>, i: Sender<NetInbound>) -> ! {
+impl Networker {
+    pub fn new() -> Self {
+        Self {
+            runtime: tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+            handle: None,
+        }
+    }
+
+    pub fn run(&mut self) -> NetworkerHandle {
+        let (external, internal) = make_handles();
+        self.handle = Some(external);
+
+        self.runtime.spawn(run(internal));
+
+        self.handle.clone().unwrap()
+    }
+
+    pub fn handle(&self) -> NetworkerHandle {
+        self.handle.clone().unwrap()
+    }
+}
+
+async fn run(internal: InternalNetworkerHandle) -> ! {
     // TODO: this is essentially #[tokio::main] but we manually build the runtime and submit this as the "main" function to it.
     // this function should set up all the networking stuff and then diverge into just serving terrain data over TCP.
 

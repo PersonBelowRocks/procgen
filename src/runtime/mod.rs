@@ -11,7 +11,10 @@ use tokio::runtime::{Builder, Runtime};
 
 use crate::generation::ChunkGenerator;
 
-use self::components::{Generator, GeneratorName};
+use self::{
+    components::{Generator, GeneratorName},
+    net::Networker,
+};
 
 mod labels {
     pub(super) static PRE_TICK: &str = "STAGE_PRE_TICK";
@@ -41,7 +44,7 @@ pub type GeneratorManager = Vec<()>;
 pub struct GenRuntime {
     sched: Schedule,
     world: World,
-    async_rt: Runtime,
+    net: Networker,
 }
 
 impl GenRuntime {
@@ -65,7 +68,7 @@ impl GenRuntime {
                 schedule
             },
             world: { World::new() },
-            async_rt: { Builder::new_multi_thread().enable_all().build().unwrap() },
+            net: Networker::new(),
         }
     }
 

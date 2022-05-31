@@ -23,7 +23,7 @@ fn chunk_sections_for_height(height: i32) -> usize {
 
 // TODO: implement Chunks
 pub struct Chunk {
-    sections: Vec<ChunkSection>, // TODO: maybe extract this into its own type?
+    pub(in crate::chunk) sections: Vec<ChunkSection>, // TODO: maybe extract this into its own type?
     bounding_box: BoundingBox,
 }
 
@@ -70,6 +70,11 @@ impl Chunk {
     #[inline]
     pub fn bounding_box(&self) -> BoundingBox {
         self.bounding_box
+    }
+
+    #[inline]
+    pub fn default_id(&self) -> BlockId {
+        self.sections[0].default_id()
     }
 }
 

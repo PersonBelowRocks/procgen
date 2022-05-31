@@ -722,6 +722,7 @@ dependencies = [
  "async-trait",
  "bevy_ecs",
  "bincode",
+ "downcast-rs",
  "enum-ordinalize",
  "env_logger",
  "flate2",
