@@ -106,7 +106,7 @@ impl Serialize for Chunk {
     {
         let pos = {
             let [x, _, z] = self.bounding_box().min();
-            na::vector![x as i32, z as i32]
+            na::vector![x as i32, z as i32] / CHUNK_SIZE
         };
 
         let min_height = self.bounding_box().min()[1] as i32;
@@ -180,3 +180,69 @@ impl<'de> Deserialize<'de> for Chunk {
 }
 
 // TODO: tests!
+#[cfg(test)]
+mod tests {
+    use crate::chunk::basic::Spaces;
+
+    use super::*;
+
+    #[test]
+    fn init_chunk_section_bincode_mirror() {
+        let mut cs = ChunkSection::new_initialized(BlockId::new(50));
+        cs.set([8i32, 8, 8], BlockId::new(12));
+        cs.set([10i32, 4, 7], BlockId::new(61));
+
+        let cs_copy: ChunkSection =
+            bincode::deserialize(&bincode::serialize(&cs).unwrap()).unwrap();
+
+        assert_eq!(cs_copy.is_initialized(), cs.is_initialized());
+        assert_eq!(cs_copy.default_id(), cs.default_id());
+
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let idx = [x, y, z];
+
+                    assert_eq!(cs.get(idx), cs_copy.get(idx));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn uninit_chunk_section_bincode_mirror() {
+        let cs = ChunkSection::new_uninitialized(BlockId::new(50));
+
+        let cs_copy: ChunkSection =
+            bincode::deserialize(&bincode::serialize(&cs).unwrap()).unwrap();
+
+        assert_eq!(cs_copy.is_initialized(), cs.is_initialized());
+        assert_eq!(cs_copy.default_id(), cs.default_id());
+    }
+
+    #[test]
+    fn chunk_bincode_mirror() {
+        let mut chunk = Chunk::new(BlockId::new(10), na::vector![4, 4], -64, 320);
+
+        chunk.set(Spaces::Cs([8i32, 0, 8]), BlockId::new(42));
+        chunk.set(Spaces::Cs([5i32, -43, 9]), BlockId::new(12));
+
+        let chunk_copy: Chunk = bincode::deserialize(&bincode::serialize(&chunk).unwrap()).unwrap();
+
+        assert_eq!(chunk_copy.default_id(), chunk.default_id());
+        assert_eq!(chunk_copy.bounding_box(), chunk.bounding_box());
+
+        let min = chunk.bounding_box().min();
+        let max = chunk.bounding_box().max();
+
+        for z in min[2]..max[2] {
+            for y in min[1]..max[1] {
+                for x in min[0]..max[0] {
+                    let idx = [x, y, z];
+
+                    assert_eq!(chunk_copy.get(idx), chunk.get(idx));
+                }
+            }
+        }
+    }
+}
