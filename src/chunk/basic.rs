@@ -15,7 +15,7 @@ pub const CHUNK_SIZE: i32 = 16;
 /// This constant is here for ergonomics so you can do add it to a chunk section's position and get the position of the opposite corner.
 pub const CHUNK_SECTION_CORNER: IVec3 = na::vector![CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE];
 
-fn chunk_sections_for_height(height: i32) -> usize {
+pub(super) fn chunk_sections_for_height(height: i32) -> usize {
     debug_assert!(height >= 0); // we can't have chunks with a negative height
 
     ((height + CHUNK_SIZE - ((height - 1).rem_euclid(CHUNK_SIZE))) / CHUNK_SIZE) as usize
@@ -24,7 +24,7 @@ fn chunk_sections_for_height(height: i32) -> usize {
 // TODO: implement Chunks
 pub struct Chunk {
     pub(in crate::chunk) sections: Vec<ChunkSection>, // TODO: maybe extract this into its own type?
-    bounding_box: BoundingBox,
+    pub(in crate::chunk) bounding_box: BoundingBox,
 }
 
 impl Chunk {
