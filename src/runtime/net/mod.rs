@@ -1,24 +1,28 @@
+mod internal;
 pub mod packets;
 
-use std::sync::{
-    mpsc::{self, Receiver, Sender},
-    Arc, Mutex,
+use std::{
+    net::SocketAddrV4,
+    sync::{
+        mpsc::{self, Receiver, Sender},
+        Arc, Mutex,
+    },
 };
 
-/// Represents an incoming command/request from a client.
-pub(crate) enum NetInbound {}
+use flate2::Compression;
 
-/// Represents an outbound command/request to a client.
-pub(crate) enum NetOutbound {}
+use self::packets::DowncastPacket;
+
+type DynPacket = Box<dyn DowncastPacket>;
 
 #[derive(Clone)]
 pub(crate) struct NetworkerHandle {
-    inbound: Arc<Mutex<Receiver<NetInbound>>>,
-    outbound: Sender<NetOutbound>,
+    inbound: Arc<Mutex<Receiver<DynPacket>>>,
+    outbound: Sender<DynPacket>,
 }
 
 impl NetworkerHandle {
-    fn new(rx_inbound: Receiver<NetInbound>, tx_outbound: Sender<NetOutbound>) -> Self {
+    fn new(rx_inbound: Receiver<DynPacket>, tx_outbound: Sender<DynPacket>) -> Self {
         Self {
             inbound: Arc::new(Mutex::new(rx_inbound)),
             outbound: tx_outbound,
@@ -26,28 +30,42 @@ impl NetworkerHandle {
     }
 }
 
+#[derive(Clone)]
 pub(self) struct InternalNetworkerHandle {
-    inbound: Sender<NetInbound>,
-    outbound: Receiver<NetOutbound>,
+    inbound: Sender<DynPacket>,
+    outbound: Arc<Mutex<Receiver<DynPacket>>>,
 }
 
 impl InternalNetworkerHandle {
-    fn new(tx_inbound: Sender<NetInbound>, rx_outbound: Receiver<NetOutbound>) -> Self {
+    fn new(tx_inbound: Sender<DynPacket>, rx_outbound: Receiver<DynPacket>) -> Self {
         Self {
             inbound: tx_inbound,
-            outbound: rx_outbound,
+            outbound: Arc::new(Mutex::new(rx_outbound)),
         }
+    }
+
+    fn send(&self, packet: DynPacket) {
+        self.inbound.send(packet).unwrap();
+    }
+
+    fn receive(&self) -> Option<DynPacket> {
+        self.outbound.lock().unwrap().try_recv().ok()
     }
 }
 
 fn make_handles() -> (NetworkerHandle, InternalNetworkerHandle) {
-    let (tx_i, rx_i) = mpsc::channel::<NetInbound>();
-    let (tx_o, rx_o) = mpsc::channel::<NetOutbound>();
+    let (tx_i, rx_i) = mpsc::channel::<DynPacket>();
+    let (tx_o, rx_o) = mpsc::channel::<DynPacket>();
 
     (
         NetworkerHandle::new(rx_i, tx_o),
         InternalNetworkerHandle::new(tx_i, rx_o),
     )
+}
+
+pub(crate) struct Params {
+    pub(crate) addr: SocketAddrV4,
+    pub(crate) compression: Compression,
 }
 
 pub(crate) struct Networker {
@@ -66,25 +84,16 @@ impl Networker {
         }
     }
 
-    pub fn run(&mut self) -> NetworkerHandle {
+    pub fn run(&mut self, params: Params) -> NetworkerHandle {
         let (external, internal) = make_handles();
         self.handle = Some(external);
 
-        self.runtime.spawn(run(internal));
+        self.runtime.spawn(internal::run(params, internal));
 
         self.handle.clone().unwrap()
     }
 
     pub fn handle(&self) -> NetworkerHandle {
         self.handle.clone().unwrap()
-    }
-}
-
-async fn run(internal: InternalNetworkerHandle) -> ! {
-    // TODO: this is essentially #[tokio::main] but we manually build the runtime and submit this as the "main" function to it.
-    // this function should set up all the networking stuff and then diverge into just serving terrain data over TCP.
-
-    loop {
-        todo!()
     }
 }

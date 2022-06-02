@@ -17,6 +17,7 @@ log = "0.4.17"
 async-trait = "0.1.53"
 bevy_ecs = "0.7.0"
 downcast-rs = "1.2"
+rand = "0.8.5"
 
 [dependencies.tokio]
 version = "1.17"
