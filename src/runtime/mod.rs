@@ -7,7 +7,6 @@ mod resources;
 mod systems;
 
 use ecs::prelude::*;
-use tokio::runtime::{Builder, Runtime};
 
 use crate::generation::ChunkGenerator;
 

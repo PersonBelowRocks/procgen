@@ -35,19 +35,22 @@ fn log_connection_error(
     }
 }
 
-type ConnectionHandle = (tokio::sync::mpsc::Sender<AddressedPacket>, Arc<Connection>);
-
 pub(super) async fn run(params: Params, internal: InternalNetworkerHandle) -> ! {
-    // TODO: this is essentially #[tokio::main] but we manually build the runtime and submit this as the "main" function to it.
-    // this function should set up all the networking stuff and then diverge into just serving terrain data over TCP.
+    // TODO: test!!!
 
     let server = Server::create(params.addr).await;
-    let connections: Shared<HashMap<u32, ConnectionHandle>> = Arc::new(RwLock::new(HashMap::new()));
 
-    tokio::spawn(server.run(params, connections.clone()));
+    let mut handle = server.run(params);
 
+    // This loop basically just transfers packets from the async stream into the sync stream, and vice versa.
     loop {
-        todo!()
+        if let Some(packet) = internal.receive() {
+            handle.outbound_tx.send(packet).await.unwrap();
+        }
+
+        if let Some(packet) = handle.inbound_rx.recv().await {
+            internal.send(packet);
+        }
     }
 }
 
@@ -58,7 +61,7 @@ struct ServerHandle {
 
 struct Server {
     listener: TcpListener,
-    connections: Shared<HashMap<u32, ConnectionHandle>>,
+    connections: Shared<HashMap<u32, Arc<Connection>>>,
 }
 
 impl Server {
@@ -73,63 +76,77 @@ impl Server {
     }
 
     /// Accept an incoming connection.
-    async fn accept(&self, id: u32) -> anyhow::Result<Connection> {
-        let (stream, _) = self.listener.accept().await?;
-        Ok(Connection::new(id, stream))
+    async fn accept(&self) -> Result<TcpStream, std::io::Error> {
+        self.listener.accept().await.map(|a| a.0)
     }
 
-    async fn run(
-        self,
+    async fn random_id(&self) -> u32 {
+        let mut id = 0;
+        let guard = self.connections.read().await;
+
+        while !guard.contains_key(&id) {
+            id = rand::random::<u32>();
+        }
+        id
+    }
+
+    async fn handle_incoming(
+        &mut self,
+        incoming: TcpStream,
         params: Params,
-        connections: Shared<HashMap<u32, ConnectionHandle>>,
-    ) -> ServerHandle {
-        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
+        inbound_tx: tokio::sync::mpsc::Sender<AddressedPacket>,
+    ) {
+        // random unique ID for the next connection
+        let random_id = self.random_id().await;
+
+        let conn = Connection::new(random_id, incoming);
+
+        let shared_connection = Arc::new(conn);
+
+        self.connections
+            .write()
+            .await
+            .insert(random_id, shared_connection.clone());
+
+        let connections_copy = self.connections.clone();
+        tokio::spawn(async move {
+            let task = tokio::spawn(Connection::run(
+                shared_connection.clone(),
+                params.compression,
+                inbound_tx,
+            ));
+
+            log_connection_error(task.await, shared_connection.clone());
+
+            connections_copy.write().await.remove(&shared_connection.id);
+        });
+    }
+
+    fn run(mut self, params: Params) -> ServerHandle {
+        let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
         let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
 
         tokio::spawn(async move {
             loop {
-                // random unique ID for the next connection
-                let random_id = {
-                    let mut id = 0;
-                    let guard = connections.read().await;
-
-                    while !guard.contains_key(&id) {
-                        id = rand::random::<u32>();
-                    }
-                    id
-                };
-
                 tokio::select! {
-                    incoming = self.accept(random_id) => {
-                        let shared_connection = Arc::new(incoming.unwrap());
-
-                        let (l_outbound_tx, l_outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
-
-                        self.connections.write().await.insert(
-                            random_id,
-                            (l_outbound_tx, shared_connection.clone()),
-                        );
-
-                        let connections_copy = self.connections.clone();
-                        let ibtx_copy = inbound_tx.clone();
-                        tokio::spawn(async move {
-                            let task = tokio::spawn(Connection::run(
-                                shared_connection.clone(),
-                                params.compression,
-                                ibtx_copy,
-                                l_outbound_rx,
-                            ));
-
-                            log_connection_error(task.await, shared_connection.clone());
-
-                            connections_copy.write().await.remove(&shared_connection.id);
-                        });
+                    incoming_stream = self.accept() => {
+                        self.handle_incoming(incoming_stream.unwrap(), params, inbound_tx.clone()).await;
+                    },
+                    outbound = outbound_rx.recv() => {
+                        if let Some(outbound) = outbound {
+                            if let Some(conn) = self.connections.read().await.get(&outbound.caller_id) {
+                                conn.send_packet(outbound).await;
+                            }
+                        }
                     },
                 }
             }
         });
 
-        todo!()
+        ServerHandle {
+            outbound_tx,
+            inbound_rx,
+        }
     }
 }
 
@@ -176,6 +193,8 @@ struct RawPacket {
 struct Connection {
     id: u32,
     address: SocketAddr,
+    outbound_tx: RwLock<Option<tokio::sync::mpsc::Sender<AddressedPacket>>>,
+    inbound_tx: RwLock<Option<tokio::sync::mpsc::Sender<AddressedPacket>>>,
     reader: tokio::sync::Mutex<BufReader<OwnedReadHalf>>,
     writer: tokio::sync::Mutex<BufWriter<OwnedWriteHalf>>,
 }
@@ -187,6 +206,8 @@ impl Connection {
         Self {
             id,
             address: r.peer_addr().unwrap(),
+            outbound_tx: RwLock::new(None),
+            inbound_tx: RwLock::new(None),
             reader: tokio::sync::Mutex::new(BufReader::new(r)),
             writer: tokio::sync::Mutex::new(BufWriter::new(w)),
         }
@@ -196,8 +217,13 @@ impl Connection {
         this: Arc<Self>,
         compression: Compression,
         inbound_tx: tokio::sync::mpsc::Sender<AddressedPacket>,
-        mut outbound_rx: tokio::sync::mpsc::Receiver<AddressedPacket>,
     ) -> anyhow::Result<()> {
+        let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
+
+        // This blocking write is fine because we'll never need to write to this guy again.
+        *this.outbound_tx.blocking_write() = Some(outbound_tx);
+        *this.inbound_tx.blocking_write() = Some(inbound_tx);
+
         let this1 = this.clone();
         let read: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
             let this = this1;
@@ -219,7 +245,11 @@ impl Connection {
                     }
                 };
 
-                inbound_tx
+                this.inbound_tx
+                    .read()
+                    .await
+                    .as_ref()
+                    .unwrap()
                     .send(AddressedPacket::new(this.id, dyn_packet))
                     .await
                     .unwrap();
@@ -245,6 +275,20 @@ impl Connection {
             res = read => res?,
             res = write => res?,
         }
+    }
+
+    /// Send a packet to the client of this connection.
+    /// # Panics
+    /// Panics if the connection is not running (i.e., [`Connection::run`] has not been called)
+    async fn send_packet(&self, packet: AddressedPacket) {
+        self.outbound_tx
+            .read()
+            .await
+            .as_ref()
+            .expect("connection is not running")
+            .send(packet)
+            .await
+            .unwrap();
     }
 
     /// Attempt to read a packet from this connection's internal stream.

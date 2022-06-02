@@ -48,20 +48,20 @@ impl NetworkerHandle {
 
 #[derive(Clone)]
 pub(self) struct InternalNetworkerHandle {
-    inbound: Sender<ChannelData>,
+    inbound: Arc<Mutex<Sender<ChannelData>>>,
     outbound: Arc<Mutex<Receiver<ChannelData>>>,
 }
 
 impl InternalNetworkerHandle {
     fn new(tx_inbound: Sender<ChannelData>, rx_outbound: Receiver<ChannelData>) -> Self {
         Self {
-            inbound: tx_inbound,
+            inbound: Arc::new(Mutex::new(tx_inbound)),
             outbound: Arc::new(Mutex::new(rx_outbound)),
         }
     }
 
     fn send(&self, packet: ChannelData) {
-        self.inbound.send(packet).unwrap();
+        self.inbound.lock().unwrap().send(packet).unwrap();
     }
 
     fn receive(&self) -> Option<ChannelData> {
@@ -79,6 +79,7 @@ fn make_handles() -> (NetworkerHandle, InternalNetworkerHandle) {
     )
 }
 
+#[derive(Copy, Clone)]
 pub(crate) struct Params {
     pub(crate) addr: SocketAddrV4,
     pub(crate) compression: Compression,
