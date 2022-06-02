@@ -35,79 +35,101 @@ fn log_connection_error(
     }
 }
 
-type ConnectionHandle = (
-    tokio::sync::mpsc::Sender<DynPacket>,
-    tokio::sync::mpsc::Receiver<DynPacket>,
-    Arc<Connection>,
-);
+type ConnectionHandle = (tokio::sync::mpsc::Sender<AddressedPacket>, Arc<Connection>);
 
 pub(super) async fn run(params: Params, internal: InternalNetworkerHandle) -> ! {
     // TODO: this is essentially #[tokio::main] but we manually build the runtime and submit this as the "main" function to it.
     // this function should set up all the networking stuff and then diverge into just serving terrain data over TCP.
 
-    let listener = Listener::create(params.addr).await;
+    let server = Server::create(params.addr).await;
     let connections: Shared<HashMap<u32, ConnectionHandle>> = Arc::new(RwLock::new(HashMap::new()));
 
+    tokio::spawn(server.run(params, connections.clone()));
+
     loop {
-        // random unique ID for the next connection
-        let random_id = {
-            let mut id = 0;
-            while !connections.read().await.contains_key(&id) {
-                id = rand::random::<u32>();
-            }
-            id
-        };
-
-        if let Ok(incoming) = listener.accept(random_id).await {
-            let shared_connection = Arc::new(incoming);
-
-            let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<DynPacket>(128);
-            let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel::<DynPacket>(128);
-
-            connections.write().await.insert(
-                random_id,
-                (outbound_tx, inbound_rx, shared_connection.clone()),
-            );
-
-            tokio::spawn(async move {
-                let task = tokio::spawn(Connection::run(
-                    shared_connection.clone(),
-                    params.compression,
-                    inbound_tx,
-                    outbound_rx,
-                ));
-
-                log_connection_error(task.await, shared_connection.clone());
-
-                connections
-                    .clone()
-                    .write()
-                    .await
-                    .remove(&shared_connection.id);
-            });
-        }
-
         todo!()
     }
 }
 
-struct Listener {
-    internal: TcpListener,
+struct ServerHandle {
+    outbound_tx: tokio::sync::mpsc::Sender<AddressedPacket>,
+    inbound_rx: tokio::sync::mpsc::Receiver<AddressedPacket>,
 }
 
-impl Listener {
+struct Server {
+    listener: TcpListener,
+    connections: Shared<HashMap<u32, ConnectionHandle>>,
+}
+
+impl Server {
     async fn create(addr: SocketAddrV4) -> Self {
         Self {
-            internal: TcpListener::bind(addr)
+            listener: TcpListener::bind(addr)
                 .await
                 .expect("couldn't bind to address"),
+
+            connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     /// Accept an incoming connection.
     async fn accept(&self, id: u32) -> anyhow::Result<Connection> {
-        let (stream, _) = self.internal.accept().await?;
+        let (stream, _) = self.listener.accept().await?;
         Ok(Connection::new(id, stream))
+    }
+
+    async fn run(
+        self,
+        params: Params,
+        connections: Shared<HashMap<u32, ConnectionHandle>>,
+    ) -> ServerHandle {
+        let (outbound_tx, outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
+        let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
+
+        tokio::spawn(async move {
+            loop {
+                // random unique ID for the next connection
+                let random_id = {
+                    let mut id = 0;
+                    let guard = connections.read().await;
+
+                    while !guard.contains_key(&id) {
+                        id = rand::random::<u32>();
+                    }
+                    id
+                };
+
+                tokio::select! {
+                    incoming = self.accept(random_id) => {
+                        let shared_connection = Arc::new(incoming.unwrap());
+
+                        let (l_outbound_tx, l_outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
+
+                        self.connections.write().await.insert(
+                            random_id,
+                            (l_outbound_tx, shared_connection.clone()),
+                        );
+
+                        let connections_copy = self.connections.clone();
+                        let ibtx_copy = inbound_tx.clone();
+                        tokio::spawn(async move {
+                            let task = tokio::spawn(Connection::run(
+                                shared_connection.clone(),
+                                params.compression,
+                                ibtx_copy,
+                                l_outbound_rx,
+                            ));
+
+                            log_connection_error(task.await, shared_connection.clone());
+
+                            connections_copy.write().await.remove(&shared_connection.id);
+                        });
+                    },
+                }
+            }
+        });
+
+        todo!()
     }
 }
 
@@ -173,8 +195,8 @@ impl Connection {
     async fn run(
         this: Arc<Self>,
         compression: Compression,
-        inbound_tx: tokio::sync::mpsc::Sender<DynPacket>,
-        mut outbound_rx: tokio::sync::mpsc::Receiver<DynPacket>,
+        inbound_tx: tokio::sync::mpsc::Sender<AddressedPacket>,
+        mut outbound_rx: tokio::sync::mpsc::Receiver<AddressedPacket>,
     ) -> anyhow::Result<()> {
         let this1 = this.clone();
         let read: JoinHandle<Result<(), Error>> = tokio::spawn(async move {
@@ -197,7 +219,10 @@ impl Connection {
                     }
                 };
 
-                inbound_tx.send(dyn_packet).await.unwrap();
+                inbound_tx
+                    .send(AddressedPacket::new(this.id, dyn_packet))
+                    .await
+                    .unwrap();
             }
         });
 
@@ -205,9 +230,11 @@ impl Connection {
             loop {
                 use super::packets::*;
                 if let Some(packet) = outbound_rx.recv().await {
-                    if let Some(packet) = packet.downcast_ref::<ReplyChunk>() {
+                    if let Some(packet) = packet.packet.downcast_ref::<ReplyChunk>() {
                         this.write_packet(packet, compression).await?;
-                    } else if let Some(packet) = packet.downcast_ref::<ConfirmGeneratorAddition>() {
+                    } else if let Some(packet) =
+                        packet.packet.downcast_ref::<ConfirmGeneratorAddition>()
+                    {
                         this.write_packet(packet, compression).await?;
                     }
                 }
