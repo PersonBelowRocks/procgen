@@ -1,5 +1,5 @@
 use serde::de::Visitor;
-use serde::ser::{SerializeMap, SerializeSeq};
+use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use vol::prelude::*;
 
