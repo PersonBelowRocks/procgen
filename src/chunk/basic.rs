@@ -21,7 +21,6 @@ pub(super) fn chunk_sections_for_height(height: i32) -> usize {
     ((height + CHUNK_SIZE - ((height - 1).rem_euclid(CHUNK_SIZE))) / CHUNK_SIZE) as usize
 }
 
-// TODO: implement Chunks
 pub struct Chunk {
     pub(in crate::chunk) sections: Vec<ChunkSection>, // TODO: maybe extract this into its own type?
     pub(in crate::chunk) bounding_box: BoundingBox,
@@ -201,6 +200,31 @@ impl<Idx: VolumeIdx> Spaces<Idx> {
 
 impl Volume for Chunk {
     type Item = BlockId;
+}
+
+impl std::fmt::Debug for Chunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Chunk")
+            .field("bounding_box", &self.bounding_box())
+            .field(
+                "sections",
+                &self
+                    .sections
+                    .iter()
+                    .enumerate()
+                    .map(|(i, section)| {
+                        let mut s = format!("{i}: (default id {:?}): ", section.default_id());
+                        if section.is_initialized() {
+                            s.push_str("INITIALIZED");
+                        } else {
+                            s.push_str("UNINITIALIZED");
+                        }
+                        s
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
 }
 
 #[cfg(test)]
