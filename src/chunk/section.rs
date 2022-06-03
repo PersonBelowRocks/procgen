@@ -2,7 +2,7 @@ use vol::builtins::*;
 
 use crate::block::BlockId;
 
-use super::basic::{CHUNK_SECTION_CORNER, CHUNK_SIZE};
+use super::basic::CHUNK_SIZE;
 
 const CHUNK_SIZE_USIZE: usize = CHUNK_SIZE as usize;
 

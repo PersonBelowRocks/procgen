@@ -41,14 +41,13 @@ pub(super) async fn run(params: Params, internal: InternalNetworkerHandle) -> ! 
     let server = Server::create(params.addr).await;
 
     let mut handle = server.run(params);
-
     // This loop basically just transfers packets from the async stream into the sync stream, and vice versa.
     loop {
         if let Some(packet) = internal.receive() {
             handle.outbound_tx.send(packet).await.unwrap();
         }
 
-        if let Some(packet) = handle.inbound_rx.recv().await {
+        if let Ok(packet) = handle.inbound_rx.try_recv() {
             internal.send(packet);
         }
     }
@@ -84,7 +83,7 @@ impl Server {
         let mut id = 0;
         let guard = self.connections.read().await;
 
-        while !guard.contains_key(&id) {
+        while guard.contains_key(&id) {
             id = rand::random::<u32>();
         }
         id
@@ -123,10 +122,11 @@ impl Server {
     }
 
     fn run(mut self, params: Params) -> ServerHandle {
+
         let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
         let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
 
-        tokio::spawn(async move {
+        let _handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
                     incoming_stream = self.accept() => {
@@ -139,7 +139,7 @@ impl Server {
                             }
                         }
                     },
-                }
+                };
             }
         });
 
@@ -157,13 +157,13 @@ impl Server {
 ///
 /// The decompressed length should be used for error checking and optimizations.
 #[derive(Copy, Clone, Debug)]
-struct Header {
+pub(super) struct Header {
     compressed_len: u32,
     decompressed_len: u32,
 }
 
 impl Header {
-    fn new(compressed_len: u32, decompressed_len: u32) -> Self {
+    pub(super) fn new(compressed_len: u32, decompressed_len: u32) -> Self {
         Self {
             compressed_len,
             decompressed_len,
@@ -180,6 +180,13 @@ impl Header {
     async fn write<S: AsyncWrite + AsyncWriteExt + Unpin>(&self, s: &mut S) -> anyhow::Result<()> {
         s.write_u32(self.compressed_len).await?;
         s.write_u32(self.decompressed_len).await?;
+
+        Ok(())
+    }
+
+    pub(super) fn sync_write<S: Write>(&self, s: &mut S) -> anyhow::Result<()> {
+        s.write_all(&self.compressed_len.to_be_bytes())?;
+        s.write_all(&self.decompressed_len.to_be_bytes())?;
 
         Ok(())
     }
@@ -220,9 +227,8 @@ impl Connection {
     ) -> anyhow::Result<()> {
         let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
 
-        // This blocking write is fine because we'll never need to write to this guy again.
-        *this.outbound_tx.blocking_write() = Some(outbound_tx);
-        *this.inbound_tx.blocking_write() = Some(inbound_tx);
+        *this.outbound_tx.write().await = Some(outbound_tx);
+        *this.inbound_tx.write().await = Some(inbound_tx);
 
         let this1 = this.clone();
         let read: JoinHandle<Result<(), Error>> = tokio::spawn(async move {

@@ -33,7 +33,8 @@ impl Packet for ReplyChunk {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AddGenerator {
-    name: String,
+    pub(super) request_id: u32,
+    pub(super) name: String,
 }
 
 impl Packet for AddGenerator {
@@ -42,7 +43,8 @@ impl Packet for AddGenerator {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConfirmGeneratorAddition {
-    generator_id: u32,
+    pub(super) request_id: u32,
+    pub(super) generator_id: u32,
 }
 
 impl Packet for ConfirmGeneratorAddition {

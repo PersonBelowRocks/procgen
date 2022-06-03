@@ -86,17 +86,17 @@ pub(crate) struct Params {
 }
 
 pub(crate) struct Networker {
-    runtime: tokio::runtime::Runtime,
+    runtime: Arc<tokio::runtime::Runtime>,
     handle: Option<NetworkerHandle>,
 }
 
 impl Networker {
     pub fn new() -> Self {
         Self {
-            runtime: tokio::runtime::Builder::new_multi_thread()
+            runtime: Arc::new(tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
-                .unwrap(),
+                .unwrap()),
             handle: None,
         }
     }
@@ -105,12 +105,84 @@ impl Networker {
         let (external, internal) = make_handles();
         self.handle = Some(external);
 
-        self.runtime.spawn(internal::run(params, internal));
+        // let guard = self.runtime.enter();
+        // Box::leak(Box::new(guard));
+        // let handle = self.runtime.spawn(internal::run(params, internal));
+        let rt = self.runtime.clone();
+        std::thread::spawn(move || {
+            let _guard = rt.enter();
+            rt.block_on(internal::run(params, internal));
+        });
 
         self.handle.clone().unwrap()
     }
 
     pub fn handle(&self) -> NetworkerHandle {
         self.handle.clone().unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{io::Write, net::TcpStream, time::Duration};
+
+    use flate2::write::ZlibEncoder;
+
+    use super::{internal::Header, packets::Packet, *};
+
+    #[test]
+    fn end_to_end_test_networker() {
+        let mut networker = Networker::new();
+
+        let params = Params {
+            addr: "0.0.0.0:33445".parse().unwrap(),
+            compression: Compression::best(),
+        };
+
+        let handle = networker.run(params);
+
+        let mut stream =
+            TcpStream::connect("127.0.0.1:33445".parse::<SocketAddrV4>().unwrap()).unwrap();
+        let packet = packets::AddGenerator {
+            request_id: 42,
+            name: "hello!!!".to_string(),
+        };
+
+        let packet_id = packets::AddGenerator::ID;
+        let packet_body = bincode::serialize(&packet).unwrap();
+
+        let mut uncompressed_buf = packet_id.to_be_bytes().to_vec();
+        uncompressed_buf.extend(packet_body);
+
+        let decompressed_len = uncompressed_buf.len();
+
+        let mut compressed_buf = Vec::<u8>::new();
+        let mut compressor = ZlibEncoder::new(&mut compressed_buf, Compression::best());
+        compressor.write_all(&uncompressed_buf).unwrap();
+        compressor.finish().unwrap();
+
+        let compressed_len = compressed_buf.len();
+
+        let header = Header::new(compressed_len as u32, decompressed_len as u32);
+
+        header.sync_write(&mut stream).unwrap();
+        stream.write_all(&compressed_buf).unwrap();
+
+        match handle
+            .inbound
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(1))
+        {
+            Ok(p) => {
+                let packet = p.packet.downcast_ref::<packets::AddGenerator>().unwrap();
+                assert_eq!(packet.name, "hello!!!");
+                assert_eq!(packet.request_id, 42);
+            }
+
+            Err(error) => {
+                panic!("Receive error in networker handle: {}", error);
+            }
+        };
     }
 }
