@@ -36,8 +36,6 @@ fn log_connection_error(
 }
 
 pub(super) async fn run(params: Params, internal: InternalNetworkerHandle) -> ! {
-    // TODO: test!!!
-
     let server = Server::create(params.addr).await;
 
     let mut handle = server.run(params);

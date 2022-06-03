@@ -132,6 +132,7 @@ mod tests {
 
     use super::{internal::Header, packets::Packet, *};
 
+    // TODO: this test is great and all, but we should also have some tests for more abnormal behaviour, like malformed packets
     #[test]
     fn end_to_end_test_networker() {
         let mut networker = Networker::new();
