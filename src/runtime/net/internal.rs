@@ -122,7 +122,6 @@ impl Server {
     }
 
     fn run(mut self, params: Params) -> ServerHandle {
-
         let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
         let (inbound_tx, inbound_rx) = tokio::sync::mpsc::channel::<AddressedPacket>(128);
 

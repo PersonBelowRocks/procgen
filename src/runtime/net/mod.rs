@@ -93,10 +93,12 @@ pub(crate) struct Networker {
 impl Networker {
     pub fn new() -> Self {
         Self {
-            runtime: Arc::new(tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap()),
+            runtime: Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
             handle: None,
         }
     }
