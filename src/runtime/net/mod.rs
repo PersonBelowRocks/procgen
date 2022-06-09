@@ -5,7 +5,7 @@ use std::{
     net::SocketAddrV4,
     sync::{
         mpsc::{self, Receiver, Sender},
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
     },
 };
 
@@ -17,7 +17,7 @@ type DynPacket = Box<dyn DowncastPacket>;
 type ChannelData = AddressedPacket;
 
 #[derive(Debug)]
-struct AddressedPacket {
+pub struct AddressedPacket {
     packet: DynPacket,
     caller_id: u32,
 }
@@ -103,7 +103,7 @@ impl Networker {
         }
     }
 
-    pub fn run(&mut self, params: Params) -> NetworkerHandle {
+    pub fn run(&mut self, params: Params) {
         let (external, internal) = make_handles();
         self.handle = Some(external);
 
@@ -116,11 +116,59 @@ impl Networker {
             rt.block_on(internal::run(params, internal));
         });
 
-        self.handle.clone().unwrap()
+        // self.handle.clone().unwrap()
     }
 
     pub fn handle(&self) -> NetworkerHandle {
         self.handle.clone().unwrap()
+    }
+
+    #[inline]
+    pub fn send(&self, packet: AddressedPacket) {
+        self.handle
+            .as_ref()
+            .expect("Networker must be started with Networker::run() before packets are sent")
+            .outbound
+            .send(packet)
+            .unwrap()
+    }
+
+    #[inline]
+    pub fn poll(&self) -> Option<AddressedPacket> {
+        self.handle
+            .as_ref()
+            .expect("Networker must be started with Networker::run() before packets are read")
+            .inbound
+            .lock()
+            .unwrap()
+            .try_recv()
+            .ok()
+    }
+
+    #[inline]
+    pub fn incoming(&self) -> Incoming<'_> {
+        Incoming {
+            guard: self
+                .handle
+                .as_ref()
+                .expect("Networker must be started with Networker::run() before packets are read")
+                .inbound
+                .lock()
+                .unwrap(),
+        }
+    }
+}
+
+pub struct Incoming<'a> {
+    guard: MutexGuard<'a, Receiver<AddressedPacket>>,
+}
+
+impl<'a> Iterator for Incoming<'a> {
+    type Item = AddressedPacket;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.guard.try_recv().ok()
     }
 }
 
@@ -153,7 +201,7 @@ mod tests {
             compression: Compression::best(),
         };
 
-        let handle = networker.run(params);
+        networker.run(params);
 
         let mut stream =
             TcpStream::connect("127.0.0.1:33445".parse::<SocketAddrV4>().unwrap()).unwrap();
@@ -182,7 +230,8 @@ mod tests {
         header.sync_write(&mut stream).unwrap();
         stream.write_all(&compressed_buf).unwrap();
 
-        match handle
+        match networker
+            .handle()
             .inbound
             .lock()
             .unwrap()
@@ -209,7 +258,7 @@ mod tests {
             compression: Compression::best(),
         };
 
-        let handle = networker.run(params);
+        networker.run(params);
 
         let mut stream =
             TcpStream::connect("127.0.0.1:33446".parse::<SocketAddrV4>().unwrap()).unwrap();
@@ -242,7 +291,8 @@ mod tests {
             stream.write_all(&compressed_buf).unwrap();
         }
 
-        let client_id = handle
+        let client_id = networker
+            .handle()
             .inbound
             .lock()
             .unwrap()
@@ -264,7 +314,7 @@ mod tests {
             packet: Box::new(chunk_packet),
         };
 
-        handle.outbound.send(sent_packet).unwrap();
+        networker.send(sent_packet);
 
         let recved_packet = {
             let header = Header::sync_read(&mut stream).unwrap();
