@@ -12,9 +12,9 @@ dc::impl_downcast!(DowncastPacket);
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct GenerateChunk {
-    request_id: u32,
-    generator_id: u32,
-    pos: na::Vector2<i32>,
+    pub(super) request_id: u32,
+    pub(super) generator_id: u32,
+    pub(super) pos: na::Vector2<i32>,
 }
 
 impl Packet for GenerateChunk {
@@ -23,8 +23,8 @@ impl Packet for GenerateChunk {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ReplyChunk {
-    request_id: u32,
-    chunk: Chunk,
+    pub(super) request_id: u32,
+    pub(super) chunk: Chunk,
 }
 
 impl Packet for ReplyChunk {

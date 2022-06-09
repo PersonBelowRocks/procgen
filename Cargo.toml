@@ -33,5 +33,5 @@ features = ["serde-serialize"]
 
 [dependencies.volume]
 git = "https://github.com/PersonBelowRocks/volume.git"
-branch = "accessing-rework"
+rev = "4537747856839b760aa13e1c86b95b0508988f33"
 features = ["nalgebra", "glam"]

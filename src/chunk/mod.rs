@@ -8,7 +8,7 @@ mod trait_impls;
 
 mod serialization;
 
-pub use basic::Chunk;
+pub use basic::{Chunk, Spaces};
 
 #[cfg(test)]
 mod tests {

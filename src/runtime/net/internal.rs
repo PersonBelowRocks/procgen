@@ -1,4 +1,9 @@
-use std::{any::type_name, collections::HashMap, io::Write, net::SocketAddr};
+use std::{
+    any::type_name,
+    collections::HashMap,
+    io::{Read, Write},
+    net::SocketAddr,
+};
 
 use anyhow::Error;
 use flate2::{read::ZlibDecoder, write::ZlibEncoder};
@@ -155,8 +160,8 @@ impl Server {
 /// The decompressed length should be used for error checking and optimizations.
 #[derive(Copy, Clone, Debug)]
 pub(super) struct Header {
-    compressed_len: u32,
-    decompressed_len: u32,
+    pub(super) compressed_len: u32,
+    pub(super) decompressed_len: u32,
 }
 
 impl Header {
@@ -186,6 +191,25 @@ impl Header {
         s.write_all(&self.decompressed_len.to_be_bytes())?;
 
         Ok(())
+    }
+
+    pub(super) fn sync_read<R: Read>(r: &mut R) -> anyhow::Result<Self> {
+        let comp_l = {
+            let mut buf = [0u8; 4];
+            r.read_exact(&mut buf)?;
+            u32::from_be_bytes(buf)
+        };
+
+        let decomp_l = {
+            let mut buf = [0u8; 4];
+            r.read_exact(&mut buf)?;
+            u32::from_be_bytes(buf)
+        };
+
+        Ok(Self {
+            compressed_len: comp_l,
+            decompressed_len: decomp_l,
+        })
     }
 }
 
@@ -332,7 +356,8 @@ impl Connection {
         packet: &P,
         compression: Compression,
     ) -> anyhow::Result<()> {
-        let decompressed_buffer = bincode::serialize(packet)?;
+        let mut decompressed_buffer = <P as Packet>::ID.to_be_bytes().to_vec();
+        decompressed_buffer.extend(bincode::serialize(packet)?);
         let decompressed_len = decompressed_buffer.len() as u32;
 
         let compressed_buffer = {

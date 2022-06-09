@@ -10,7 +10,7 @@ type CubicVolume<const N: usize, T> = StackVolume<N, N, N, T>;
 type ChunkSectionStorage = CubicVolume<CHUNK_SIZE_USIZE, BlockId>;
 
 /// A 16x16x16 cube of voxels/blocks.
-// #[derive(Debug)]
+#[derive(Clone)]
 pub struct ChunkSection {
     default: BlockId,
     volume: Option<ChunkSectionStorage>,
@@ -48,6 +48,23 @@ impl ChunkSection {
     #[inline]
     pub fn default_id(&self) -> BlockId {
         self.default
+    }
+}
+
+impl std::cmp::PartialEq for ChunkSection {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        for x in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    if self.get([x, y, z]) != other.get([x, y, z]) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        true
     }
 }
 

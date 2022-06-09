@@ -126,15 +126,26 @@ impl Networker {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Write, net::TcpStream, time::Duration};
+    use std::{
+        io::{Read, Write},
+        net::TcpStream,
+        time::Duration,
+    };
 
-    use flate2::write::ZlibEncoder;
+    use flate2::{read::ZlibDecoder, write::ZlibEncoder};
+    use volume::Volume;
 
-    use super::{internal::Header, packets::Packet, *};
+    use crate::chunk::{Chunk, Spaces};
+
+    use super::{
+        internal::Header,
+        packets::{GenerateChunk, Packet, ReplyChunk},
+        *,
+    };
 
     // TODO: this test is great and all, but we should also have some tests for more abnormal behaviour, like malformed packets
     #[test]
-    fn end_to_end_test_networker() {
+    fn networker_recv() {
         let mut networker = Networker::new();
 
         let params = Params {
@@ -187,5 +198,93 @@ mod tests {
                 panic!("Receive error in networker handle: {}", error);
             }
         };
+    }
+
+    #[test]
+    fn networker_send() {
+        let mut networker = Networker::new();
+
+        let params = Params {
+            addr: "0.0.0.0:33446".parse().unwrap(),
+            compression: Compression::best(),
+        };
+
+        let handle = networker.run(params);
+
+        let mut stream =
+            TcpStream::connect("127.0.0.1:33446".parse::<SocketAddrV4>().unwrap()).unwrap();
+
+        let generate_chunk_packet = GenerateChunk {
+            request_id: 560,
+            generator_id: 4,
+            pos: na::vector![-6, 2],
+        };
+
+        let packet_id = GenerateChunk::ID;
+        let packet_body = bincode::serialize(&generate_chunk_packet).unwrap();
+
+        {
+            let mut uncompressed_buf = packet_id.to_be_bytes().to_vec();
+            uncompressed_buf.extend(packet_body);
+
+            let decompressed_len = uncompressed_buf.len();
+
+            let mut compressed_buf = Vec::<u8>::new();
+            let mut compressor = ZlibEncoder::new(&mut compressed_buf, Compression::best());
+            compressor.write_all(&uncompressed_buf).unwrap();
+            compressor.finish().unwrap();
+
+            let compressed_len = compressed_buf.len();
+
+            let header = Header::new(compressed_len as u32, decompressed_len as u32);
+
+            header.sync_write(&mut stream).unwrap();
+            stream.write_all(&compressed_buf).unwrap();
+        }
+
+        let client_id = handle
+            .inbound
+            .lock()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .caller_id;
+
+        let mut chunk = Chunk::new(77.into(), na::vector![-6, 2], -64, 320);
+        chunk.set(Spaces::Cs([10i32, 120, 8]), 80.into());
+        chunk.set(Spaces::Cs([6i32, -20, 9]), 92.into());
+
+        let chunk_packet = ReplyChunk {
+            request_id: 560,
+            chunk: chunk.clone(),
+        };
+
+        let sent_packet = AddressedPacket {
+            caller_id: client_id,
+            packet: Box::new(chunk_packet),
+        };
+
+        handle.outbound.send(sent_packet).unwrap();
+
+        let recved_packet = {
+            let header = Header::sync_read(&mut stream).unwrap();
+            let mut buf = vec![0u8; header.compressed_len as usize];
+
+            stream.read_exact(&mut buf).unwrap();
+            let decompressed_buf = {
+                let mut decompressor = ZlibDecoder::new(&buf[..]);
+                let mut buf = Vec::<u8>::new();
+                decompressor.read_to_end(&mut buf).unwrap();
+                buf
+            };
+
+            let id = u16::from_be_bytes(decompressed_buf[..2].try_into().unwrap());
+            assert_eq!(id, ReplyChunk::ID);
+
+            bincode::deserialize::<ReplyChunk>(&decompressed_buf[2..]).unwrap()
+        };
+
+        assert_eq!(recved_packet.request_id, 560);
+        assert_eq!(recved_packet.chunk, chunk);
     }
 }

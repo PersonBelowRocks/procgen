@@ -21,6 +21,7 @@ pub(super) fn chunk_sections_for_height(height: i32) -> usize {
     ((height + CHUNK_SIZE - ((height - 1).rem_euclid(CHUNK_SIZE))) / CHUNK_SIZE) as usize
 }
 
+#[derive(PartialEq, Clone)]
 pub struct Chunk {
     pub(in crate::chunk) sections: Vec<ChunkSection>, // TODO: maybe extract this into its own type?
     pub(in crate::chunk) bounding_box: BoundingBox,
