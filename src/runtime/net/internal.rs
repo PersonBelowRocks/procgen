@@ -329,8 +329,6 @@ impl Connection {
         reader.read_exact(&mut compressed_buffer).await?;
 
         let decompressed_buffer = {
-            use std::io::Read;
-
             let mut buf = Vec::<u8>::with_capacity(header.decompressed_len as usize);
 
             let mut decoder = ZlibDecoder::new(&compressed_buffer[..]);
