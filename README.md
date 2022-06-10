@@ -14,9 +14,5 @@ Reasons being:
   crate for linear algebra which I find quite satisfying too.
 
 
-# ECS Branch
-This branch is going to be using an [ECS](https://crates.io/crates/bevy_ecs) for the generator server. This might be a bad idea but using an ECS would allow
-for splitting up the logic in a lot neater ways, and probably completely separating any networking stuff from procedural generation stuff (which would make everything a lot
-easier to maintain).
-
-This branch is also going to be using a [little crate](https://github.com/PersonBelowRocks/volume) for working with 3D voxel data.
+# Server Branch
+This branch is going to be the server implementation, and will also move away from using an ECS.
