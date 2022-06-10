@@ -53,11 +53,6 @@ impl Chunk {
     }
 
     #[inline]
-    pub fn from_args(args: GenerationArgs) -> Self {
-        Self::new(args.default, args.pos, args.min_height, args.max_height)
-    }
-
-    #[inline]
     fn get_chunk_section(&self, chunk_section_idx: usize) -> Option<&ChunkSection> {
         self.sections.get(chunk_section_idx)
     }

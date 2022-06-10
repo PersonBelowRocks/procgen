@@ -19,15 +19,23 @@ type ChannelData = AddressedPacket;
 #[derive(Debug)]
 pub struct AddressedPacket {
     packet: DynPacket,
-    caller_id: u32,
+    client_id: u32,
 }
 
 impl AddressedPacket {
-    fn new(id: u32, packet: DynPacket) -> Self {
+    pub fn new<P: DowncastPacket>(id: u32, packet: P) -> Self {
         Self {
-            packet,
-            caller_id: id,
+            packet: Box::new(packet),
+            client_id: id,
         }
+    }
+
+    pub fn downcast_ref<T: DowncastPacket>(&self) -> Option<&T> {
+        self.packet.downcast_ref()
+    }
+
+    pub fn id(&self) -> u32 {
+        self.client_id
     }
 }
 
@@ -85,6 +93,7 @@ pub(crate) struct Params {
     pub(crate) compression: Compression,
 }
 
+#[derive(Clone)]
 pub(crate) struct Networker {
     runtime: Arc<tokio::runtime::Runtime>,
     handle: Option<NetworkerHandle>,
@@ -298,7 +307,7 @@ mod tests {
             .unwrap()
             .recv_timeout(Duration::from_secs(1))
             .unwrap()
-            .caller_id;
+            .client_id;
 
         let mut chunk = Chunk::new(77.into(), na::vector![-6, 2], -64, 320);
         chunk.set(Spaces::Cs([10i32, 120, 8]), 80.into());
@@ -310,7 +319,7 @@ mod tests {
         };
 
         let sent_packet = AddressedPacket {
-            caller_id: client_id,
+            client_id,
             packet: Box::new(chunk_packet),
         };
 

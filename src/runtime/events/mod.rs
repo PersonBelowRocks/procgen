@@ -1,6 +1,6 @@
 use crate::{chunk::Chunk, generation::GenerationArgs};
 
-use super::{components::GeneratorName, RequestIdent};
+use super::RequestIdent;
 
 pub struct FinishedGenerateChunkEvent {
     chunk: Chunk,

@@ -1,4 +1,10 @@
-use crate::chunk::Chunk;
+use std::marker::PhantomData;
+
+use crate::{
+    block::BlockId,
+    chunk::Chunk,
+    generation::{FactoryParameters, GenerationArgs},
+};
 
 pub(crate) trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
 
@@ -12,9 +18,15 @@ dc::impl_downcast!(DowncastPacket);
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct GenerateChunk {
-    pub(super) request_id: u32,
-    pub(super) generator_id: u32,
-    pub(super) pos: na::Vector2<i32>,
+    pub(crate) request_id: u32,
+    pub(crate) generator_id: u32,
+    pub(crate) pos: na::Vector2<i32>,
+}
+
+impl GenerateChunk {
+    pub fn args(&self) -> GenerationArgs {
+        GenerationArgs { pos: self.pos }
+    }
 }
 
 impl Packet for GenerateChunk {
@@ -23,8 +35,8 @@ impl Packet for GenerateChunk {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ReplyChunk {
-    pub(super) request_id: u32,
-    pub(super) chunk: Chunk,
+    pub(crate) request_id: u32,
+    pub(crate) chunk: Chunk,
 }
 
 impl Packet for ReplyChunk {
@@ -33,8 +45,23 @@ impl Packet for ReplyChunk {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AddGenerator {
-    pub(super) request_id: u32,
-    pub(super) name: String,
+    pub(crate) request_id: u32,
+    pub(crate) name: String,
+    pub(crate) min_height: i32,
+    pub(crate) max_height: i32,
+    pub(crate) default_id: BlockId,
+}
+
+impl AddGenerator {
+    pub fn factory_params(&self) -> FactoryParameters<'_> {
+        FactoryParameters {
+            min_height: self.min_height,
+            max_height: self.max_height,
+            default: self.default_id,
+
+            _future_noncopy_params: PhantomData,
+        }
+    }
 }
 
 impl Packet for AddGenerator {
@@ -43,8 +70,17 @@ impl Packet for AddGenerator {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConfirmGeneratorAddition {
-    pub(super) request_id: u32,
-    pub(super) generator_id: u32,
+    pub(crate) request_id: u32,
+    pub(crate) generator_id: u32,
+}
+
+impl ConfirmGeneratorAddition {
+    pub fn new(request_id: u32, generator_id: u32) -> Self {
+        Self {
+            request_id,
+            generator_id,
+        }
+    }
 }
 
 impl Packet for ConfirmGeneratorAddition {

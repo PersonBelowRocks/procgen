@@ -136,7 +136,7 @@ impl Server {
                     },
                     outbound = outbound_rx.recv() => {
                         if let Some(outbound) = outbound {
-                            if let Some(conn) = self.connections.read().await.get(&outbound.caller_id) {
+                            if let Some(conn) = self.connections.read().await.get(&outbound.client_id) {
                                 conn.send_packet(outbound).await;
                             }
                         }
@@ -258,14 +258,14 @@ impl Connection {
                 use super::packets::*;
                 let packet = this.read_packet().await?;
 
-                let dyn_packet: DynPacket = match packet.id {
+                let addressed_packet: AddressedPacket = match packet.id {
                     GenerateChunk::ID => {
                         let packet: GenerateChunk = bincode::deserialize(&packet.body)?;
-                        Box::new(packet)
+                        AddressedPacket::new(this.id, packet)
                     }
                     AddGenerator::ID => {
                         let packet: AddGenerator = bincode::deserialize(&packet.body)?;
-                        Box::new(packet)
+                        AddressedPacket::new(this.id, packet)
                     }
                     _ => {
                         anyhow::bail!("Received invalid packet ID")
@@ -277,7 +277,7 @@ impl Connection {
                     .await
                     .as_ref()
                     .unwrap()
-                    .send(AddressedPacket::new(this.id, dyn_packet))
+                    .send(addressed_packet)
                     .await
                     .unwrap();
             }
