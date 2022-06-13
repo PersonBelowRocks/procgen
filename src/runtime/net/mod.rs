@@ -1,4 +1,4 @@
-mod internal;
+pub(crate) mod internal;
 pub mod packets;
 
 use std::{
@@ -13,6 +13,8 @@ use flate2::Compression;
 
 use self::packets::DowncastPacket;
 
+use super::server::ServerParams;
+
 type DynPacket = Box<dyn DowncastPacket>;
 type ChannelData = AddressedPacket;
 
@@ -23,14 +25,14 @@ pub struct AddressedPacket {
 }
 
 impl AddressedPacket {
-    pub fn new<P: DowncastPacket>(id: u32, packet: P) -> Self {
+    pub(crate) fn new<P: DowncastPacket>(id: u32, packet: P) -> Self {
         Self {
             packet: Box::new(packet),
             client_id: id,
         }
     }
 
-    pub fn downcast_ref<T: DowncastPacket>(&self) -> Option<&T> {
+    pub(crate) fn downcast_ref<T: DowncastPacket>(&self) -> Option<&T> {
         self.packet.downcast_ref()
     }
 
@@ -91,6 +93,15 @@ fn make_handles() -> (NetworkerHandle, InternalNetworkerHandle) {
 pub(crate) struct Params {
     pub(crate) addr: SocketAddrV4,
     pub(crate) compression: Compression,
+}
+
+impl From<ServerParams> for Params {
+    fn from(p: ServerParams) -> Self {
+        Self {
+            addr: p.addr,
+            compression: p.compression,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -217,6 +228,9 @@ mod tests {
         let packet = packets::AddGenerator {
             request_id: 42,
             name: "hello!!!".to_string(),
+            min_height: -64,
+            max_height: 320,
+            default_id: 0.into(),
         };
 
         let packet_id = packets::AddGenerator::ID;

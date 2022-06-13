@@ -2,7 +2,6 @@ use vol::prelude::*;
 
 use crate::{
     block::BlockId,
-    generation::GenerationArgs,
     util::{IVec2, IVec3},
 };
 

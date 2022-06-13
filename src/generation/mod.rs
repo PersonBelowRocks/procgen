@@ -8,6 +8,7 @@ pub struct GenerationArgs {
     pub pos: IVec2,
 }
 
+#[allow(dead_code)]
 #[derive(Copy, Clone)]
 pub struct FactoryParameters<'a> {
     pub(crate) max_height: i32,
@@ -20,13 +21,28 @@ pub struct FactoryParameters<'a> {
     // TODO: this should have a seed field too for RNG
 }
 
-pub trait GeneratorFactory: Send {
+pub trait DynGeneratorFactory: Send {
     fn create(&self, params: FactoryParameters<'_>) -> Box<dyn DynChunkGenerator>;
 }
 
-pub trait ChunkGenerator: Send + Sync + DynChunkGenerator + GeneratorFactory {
+impl<T: GeneratorFactory> DynGeneratorFactory for T {
+    #[inline]
+    fn create(&self, params: FactoryParameters<'_>) -> Box<dyn DynChunkGenerator> {
+        Box::new(<T as GeneratorFactory>::create(self, params))
+    }
+}
+
+pub trait GeneratorFactory: Send + 'static {
+    type Generator: ChunkGenerator;
+
+    fn create(&self, params: FactoryParameters<'_>) -> Self::Generator;
+}
+
+pub trait ChunkGenerator: Send + Sync + DynChunkGenerator {
     /// The name of this generator. Must be unique or you'll suffer.
     const NAME: &'static str;
+
+    type Factory: GeneratorFactory<Generator = Self> + 'static;
 
     /// Fill the given `chunk` using the generator.
     /// Implementors can honestly do whatever they feel like here with the chunk, this is THE terrain generation function.
@@ -34,7 +50,7 @@ pub trait ChunkGenerator: Send + Sync + DynChunkGenerator + GeneratorFactory {
     /// manually within the function.
     fn generate(&self, args: &GenerationArgs) -> anyhow::Result<Chunk>;
 
-    fn create(params: FactoryParameters<'_>) -> Self;
+    fn factory() -> Self::Factory;
 }
 
 pub trait DynChunkGenerator: Send + Sync {
@@ -49,11 +65,5 @@ impl<T: ChunkGenerator> DynChunkGenerator for T {
     #[inline]
     fn generate(&self, args: &GenerationArgs) -> anyhow::Result<Chunk> {
         <Self as ChunkGenerator>::generate(self, args)
-    }
-}
-
-impl<T: ChunkGenerator + 'static> GeneratorFactory for T {
-    fn create(&self, params: FactoryParameters<'_>) -> Box<dyn DynChunkGenerator> {
-        Box::new(<Self as ChunkGenerator>::create(params))
     }
 }

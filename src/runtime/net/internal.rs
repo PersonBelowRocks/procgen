@@ -159,41 +159,46 @@ impl Server {
 ///
 /// The decompressed length should be used for error checking and optimizations.
 #[derive(Copy, Clone, Debug)]
-pub(super) struct Header {
-    pub(super) compressed_len: u32,
-    pub(super) decompressed_len: u32,
+pub(crate) struct Header {
+    pub(crate) compressed_len: u32,
+    pub(crate) decompressed_len: u32,
 }
 
 impl Header {
-    pub(super) fn new(compressed_len: u32, decompressed_len: u32) -> Self {
+    pub(crate) fn new(compressed_len: u32, decompressed_len: u32) -> Self {
         Self {
             compressed_len,
             decompressed_len,
         }
     }
 
-    async fn read<S: AsyncRead + AsyncReadExt + Unpin>(s: &mut S) -> anyhow::Result<Self> {
+    pub(crate) async fn read<S: AsyncRead + AsyncReadExt + Unpin>(
+        s: &mut S,
+    ) -> anyhow::Result<Self> {
         let compressed_len = s.read_u32().await?;
         let decompressed_len = s.read_u32().await?;
 
         Ok(Self::new(compressed_len, decompressed_len))
     }
 
-    async fn write<S: AsyncWrite + AsyncWriteExt + Unpin>(&self, s: &mut S) -> anyhow::Result<()> {
+    pub(crate) async fn write<S: AsyncWrite + AsyncWriteExt + Unpin>(
+        &self,
+        s: &mut S,
+    ) -> anyhow::Result<()> {
         s.write_u32(self.compressed_len).await?;
         s.write_u32(self.decompressed_len).await?;
 
         Ok(())
     }
 
-    pub(super) fn sync_write<S: Write>(&self, s: &mut S) -> anyhow::Result<()> {
+    pub(crate) fn sync_write<S: Write>(&self, s: &mut S) -> anyhow::Result<()> {
         s.write_all(&self.compressed_len.to_be_bytes())?;
         s.write_all(&self.decompressed_len.to_be_bytes())?;
 
         Ok(())
     }
 
-    pub(super) fn sync_read<R: Read>(r: &mut R) -> anyhow::Result<Self> {
+    pub(crate) fn sync_read<R: Read>(r: &mut R) -> anyhow::Result<Self> {
         let comp_l = {
             let mut buf = [0u8; 4];
             r.read_exact(&mut buf)?;
