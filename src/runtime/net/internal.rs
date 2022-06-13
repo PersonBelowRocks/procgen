@@ -63,7 +63,7 @@ struct ServerHandle {
 
 struct Server {
     listener: TcpListener,
-    connections: Shared<HashMap<u32, Arc<Connection>>>,
+    connections: Shared<HashMap<ClientId, Arc<Connection>>>,
 }
 
 impl Server {
@@ -82,14 +82,14 @@ impl Server {
         self.listener.accept().await.map(|a| a.0)
     }
 
-    async fn random_id(&self) -> u32 {
+    async fn random_client_id(&self) -> ClientId {
         let mut id = 0;
         let guard = self.connections.read().await;
 
-        while guard.contains_key(&id) {
+        while guard.contains_key(&id.into()) {
             id = rand::random::<u32>();
         }
-        id
+        id.into()
     }
 
     async fn handle_incoming(
@@ -99,7 +99,7 @@ impl Server {
         inbound_tx: tokio::sync::mpsc::Sender<AddressedPacket>,
     ) {
         // random unique ID for the next connection
-        let random_id = self.random_id().await;
+        let random_id = self.random_client_id().await;
 
         let conn = Connection::new(random_id, incoming);
 
@@ -224,7 +224,7 @@ struct RawPacket {
 }
 
 struct Connection {
-    id: u32,
+    id: ClientId,
     address: SocketAddr,
     outbound_tx: RwLock<Option<tokio::sync::mpsc::Sender<AddressedPacket>>>,
     inbound_tx: RwLock<Option<tokio::sync::mpsc::Sender<AddressedPacket>>>,
@@ -233,7 +233,7 @@ struct Connection {
 }
 
 impl Connection {
-    fn new(id: u32, stream: TcpStream) -> Self {
+    fn new(id: ClientId, stream: TcpStream) -> Self {
         let (r, w) = stream.into_split();
 
         Self {

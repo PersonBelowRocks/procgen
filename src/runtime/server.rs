@@ -19,27 +19,13 @@ use crate::{
     },
 };
 
-use super::net::{
-    packets::{self, ReplyChunk},
-    AddressedPacket, Networker,
+use super::{
+    net::{
+        packets::{self, ReplyChunk},
+        AddressedPacket, Networker,
+    },
+    util::{GeneratorId, RequestIdent},
 };
-
-// TODO: We use a lot of request ID, client ID, generator ID, etc. Currently these are all just u32s which makes it hard to tell which is which,
-// so we should have separate types for separate IDs. This could also allow RequestIdent to be .into()'ed into these other types for extra ergonomics!
-#[derive(Clone, Copy, Debug)]
-struct RequestIdent {
-    request_id: u32,
-    client_id: u32,
-}
-
-impl RequestIdent {
-    fn new(request_id: u32, client_id: u32) -> Self {
-        Self {
-            request_id,
-            client_id,
-        }
-    }
-}
 
 enum GenerationResult {
     Success(RequestIdent, Chunk),
@@ -47,7 +33,7 @@ enum GenerationResult {
 }
 
 impl GenerationResult {
-    fn id(&self) -> RequestIdent {
+    fn ident(&self) -> RequestIdent {
         match self {
             Self::Success(id, _) => *id,
             Self::Failure(id, _) => *id,
@@ -76,7 +62,7 @@ impl<'a> Iterator for CompletedChunksIterator<'a> {
 
 #[derive(Debug, te::Error)]
 #[error("Generator not found with ID {0}")]
-struct ManagerSubmitError(u32);
+struct ManagerSubmitError(GeneratorId);
 
 #[derive(Debug, te::Error)]
 #[error("Couldn't find generator factory with name '{0}'")]
@@ -97,7 +83,7 @@ impl ChunkReceiver {
 
 struct GeneratorManager {
     factories: HashMap<&'static str, Box<dyn DynGeneratorFactory>>,
-    instances: HashMap<u32, Arc<Box<dyn DynChunkGenerator>>>,
+    instances: HashMap<GeneratorId, Arc<Box<dyn DynChunkGenerator>>>,
     workers: Mutex<ThreadPool>,
     channel_pair: (
         Sender<GenerationResult>,
@@ -135,11 +121,11 @@ impl GeneratorManager {
             .ok_or(UnknownFactoryError(generator_name))
     }
 
-    fn random_gen_id(&self) -> u32 {
+    fn random_gen_id(&self) -> GeneratorId {
         loop {
             let id = rand::random::<u32>();
-            if !self.instances.contains_key(&id) {
-                return id;
+            if !self.instances.contains_key(&id.into()) {
+                return id.into();
             }
         }
     }
@@ -148,7 +134,7 @@ impl GeneratorManager {
         &mut self,
         generator_name: &'a str,
         factory_params: FactoryParameters<'_>,
-    ) -> Result<u32, UnknownFactoryError<'a>> {
+    ) -> Result<GeneratorId, UnknownFactoryError<'a>> {
         let instance = self.create_gen_instance(generator_name, factory_params)?;
         let id = self.random_gen_id();
 
@@ -159,7 +145,7 @@ impl GeneratorManager {
     pub fn submit_chunk(
         &self,
         request_ident: RequestIdent,
-        generator_id: u32,
+        generator_id: GeneratorId,
         args: GenerationArgs,
     ) -> Result<(), ManagerSubmitError> {
         let tx = self.channel_pair.0.clone();
@@ -292,10 +278,10 @@ impl Server {
                         match completed {
                             GenerationResult::Success(ident, chunk) => {
                                 let packet = ReplyChunk {
-                                    request_id: ident.request_id,
+                                    request_id: ident.into(),
                                     chunk,
                                 };
-                                net.send(AddressedPacket::new(ident.client_id, packet));
+                                net.send(AddressedPacket::new(ident.into(), packet));
                             }
                             GenerationResult::Failure(ident, error) => {
                                 log::error!("Request {ident:?} failed: {error}");
@@ -458,7 +444,7 @@ mod tests {
 
         client
             .send_packet(&packets::AddGenerator {
-                request_id: 500,
+                request_id: 500.into(),
                 name: MockGenerator::NAME.to_string(),
                 min_height: -64,
                 max_height: 320,
@@ -470,20 +456,20 @@ mod tests {
             let packet = client
                 .read_packet::<packets::ConfirmGeneratorAddition>()
                 .unwrap();
-            assert_eq!(packet.request_id, 500);
+            assert_eq!(packet.request_id, 500.into());
             packet.generator_id
         };
 
         client
             .send_packet(&packets::GenerateChunk {
-                request_id: 420,
+                request_id: 420.into(),
                 generator_id,
                 pos: na::vector![6i32, 4],
             })
             .unwrap();
 
         let packet = client.read_packet::<packets::ReplyChunk>().unwrap();
-        assert_eq!(packet.request_id, 420);
+        assert_eq!(packet.request_id, 420.into());
 
         for x in 0..16 {
             for z in 0..16 {

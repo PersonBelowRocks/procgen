@@ -13,19 +13,19 @@ use flate2::Compression;
 
 use self::packets::DowncastPacket;
 
-use super::server::ServerParams;
+use super::{server::ServerParams, util::ClientId};
 
 type DynPacket = Box<dyn DowncastPacket>;
 type ChannelData = AddressedPacket;
 
 #[derive(Debug)]
-pub struct AddressedPacket {
+pub(crate) struct AddressedPacket {
     packet: DynPacket,
-    client_id: u32,
+    client_id: ClientId,
 }
 
 impl AddressedPacket {
-    pub(crate) fn new<P: DowncastPacket>(id: u32, packet: P) -> Self {
+    pub(crate) fn new<P: DowncastPacket>(id: ClientId, packet: P) -> Self {
         Self {
             packet: Box::new(packet),
             client_id: id,
@@ -36,7 +36,7 @@ impl AddressedPacket {
         self.packet.downcast_ref()
     }
 
-    pub fn id(&self) -> u32 {
+    pub(crate) fn id(&self) -> ClientId {
         self.client_id
     }
 }
@@ -179,7 +179,7 @@ impl Networker {
     }
 }
 
-pub struct Incoming<'a> {
+pub(crate) struct Incoming<'a> {
     guard: MutexGuard<'a, Receiver<AddressedPacket>>,
 }
 
@@ -226,7 +226,7 @@ mod tests {
         let mut stream =
             TcpStream::connect("127.0.0.1:33445".parse::<SocketAddrV4>().unwrap()).unwrap();
         let packet = packets::AddGenerator {
-            request_id: 42,
+            request_id: 42.into(),
             name: "hello!!!".to_string(),
             min_height: -64,
             max_height: 320,
@@ -263,7 +263,7 @@ mod tests {
             Ok(p) => {
                 let packet = p.packet.downcast_ref::<packets::AddGenerator>().unwrap();
                 assert_eq!(packet.name, "hello!!!");
-                assert_eq!(packet.request_id, 42);
+                assert_eq!(packet.request_id, 42.into());
             }
 
             Err(error) => {
@@ -287,8 +287,8 @@ mod tests {
             TcpStream::connect("127.0.0.1:33446".parse::<SocketAddrV4>().unwrap()).unwrap();
 
         let generate_chunk_packet = GenerateChunk {
-            request_id: 560,
-            generator_id: 4,
+            request_id: 560.into(),
+            generator_id: 4.into(),
             pos: na::vector![-6, 2],
         };
 
@@ -328,7 +328,7 @@ mod tests {
         chunk.set(Spaces::Cs([6i32, -20, 9]), 92.into());
 
         let chunk_packet = ReplyChunk {
-            request_id: 560,
+            request_id: 560.into(),
             chunk: chunk.clone(),
         };
 
@@ -357,7 +357,7 @@ mod tests {
             bincode::deserialize::<ReplyChunk>(&decompressed_buf[2..]).unwrap()
         };
 
-        assert_eq!(recved_packet.request_id, 560);
+        assert_eq!(recved_packet.request_id, 560.into());
         assert_eq!(recved_packet.chunk, chunk);
     }
 }

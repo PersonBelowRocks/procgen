@@ -4,6 +4,7 @@ use crate::{
     block::BlockId,
     chunk::Chunk,
     generation::{FactoryParameters, GenerationArgs},
+    runtime::util::{GeneratorId, RequestId},
 };
 
 pub(crate) trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
@@ -18,8 +19,8 @@ dc::impl_downcast!(DowncastPacket);
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct GenerateChunk {
-    pub(crate) request_id: u32,
-    pub(crate) generator_id: u32,
+    pub(crate) request_id: RequestId,
+    pub(crate) generator_id: GeneratorId,
     pub(crate) pos: na::Vector2<i32>,
 }
 
@@ -35,7 +36,7 @@ impl Packet for GenerateChunk {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ReplyChunk {
-    pub(crate) request_id: u32,
+    pub(crate) request_id: RequestId,
     pub(crate) chunk: Chunk,
 }
 
@@ -45,7 +46,7 @@ impl Packet for ReplyChunk {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct AddGenerator {
-    pub(crate) request_id: u32,
+    pub(crate) request_id: RequestId,
     pub(crate) name: String,
     pub(crate) min_height: i32,
     pub(crate) max_height: i32,
@@ -70,12 +71,12 @@ impl Packet for AddGenerator {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub(crate) struct ConfirmGeneratorAddition {
-    pub(crate) request_id: u32,
-    pub(crate) generator_id: u32,
+    pub(crate) request_id: RequestId,
+    pub(crate) generator_id: GeneratorId,
 }
 
 impl ConfirmGeneratorAddition {
-    pub fn new(request_id: u32, generator_id: u32) -> Self {
+    pub fn new(request_id: RequestId, generator_id: GeneratorId) -> Self {
         Self {
             request_id,
             generator_id,
