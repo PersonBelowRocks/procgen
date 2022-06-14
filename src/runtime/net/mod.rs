@@ -127,16 +127,11 @@ impl Networker {
         let (external, internal) = make_handles();
         self.handle = Some(external);
 
-        // let guard = self.runtime.enter();
-        // Box::leak(Box::new(guard));
-        // let handle = self.runtime.spawn(internal::run(params, internal));
         let rt = self.runtime.clone();
         std::thread::spawn(move || {
             let _guard = rt.enter();
             rt.block_on(internal::run(params, internal));
         });
-
-        // self.handle.clone().unwrap()
     }
 
     pub fn handle(&self) -> NetworkerHandle {
