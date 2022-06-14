@@ -24,23 +24,23 @@ use super::{
         packets::{self, ReplyChunk},
         AddressedPacket, Networker,
     },
-    util::{GeneratorId, RequestIdent},
+    util::{GenerationIdent, GeneratorId, RequestIdent},
 };
 
 enum GenerationResult {
-    Success(RequestIdent, Chunk),
-    Failure(RequestIdent, Error),
+    Success(GenerationIdent, Chunk),
+    Failure(GenerationIdent, Error),
 }
 
 impl GenerationResult {
-    fn ident(&self) -> RequestIdent {
+    fn ident(&self) -> GenerationIdent {
         match self {
             Self::Success(id, _) => *id,
             Self::Failure(id, _) => *id,
         }
     }
 
-    fn from_result(res: anyhow::Result<Chunk>, id: RequestIdent) -> Self {
+    fn from_result(res: anyhow::Result<Chunk>, id: GenerationIdent) -> Self {
         match res {
             anyhow::Result::Ok(chunk) => Self::Success(id, chunk),
             anyhow::Result::Err(error) => Self::Failure(id, error),
@@ -156,7 +156,10 @@ impl GeneratorManager {
             .clone();
 
         self.workers.lock().unwrap().execute(move || {
-            let result = GenerationResult::from_result(instance.generate(&args), request_ident);
+            let result = GenerationResult::from_result(
+                instance.generate(&args),
+                request_ident.generation_ident(generator_id),
+            );
             tx.send(result).unwrap();
         });
 
@@ -285,6 +288,8 @@ impl Server {
                             }
                             GenerationResult::Failure(ident, error) => {
                                 log::error!("Request {ident:?} failed: {error}");
+                                // let net_error = ProtocolErrorKind::ChunkGenerationFailure { generator_id: , request_id: () };
+                                // let packet = ProtocolError::gentle()
                             }
                         }
                     }

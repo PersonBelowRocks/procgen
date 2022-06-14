@@ -31,22 +31,47 @@ macro_rules! impl_from_u32_id {
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq)]
-pub(crate) struct RequestIdent {
-    pub(crate) request_id: RequestId,
-    pub(crate) client_id: ClientId,
+pub struct RequestIdent {
+    pub request_id: RequestId,
+    pub client_id: ClientId,
 }
 
 impl RequestIdent {
-    pub(crate) fn new(request_id: RequestId, client_id: ClientId) -> Self {
+    pub fn new(request_id: RequestId, client_id: ClientId) -> Self {
         Self {
             request_id,
             client_id,
         }
     }
+
+    pub fn generation_ident(self, generator_id: GeneratorId) -> GenerationIdent {
+        GenerationIdent::new(self, generator_id)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq)]
+pub struct GenerationIdent {
+    pub request_ident: RequestIdent,
+    pub generator_id: GeneratorId,
+}
+
+impl GenerationIdent {
+    pub fn new(request_ident: RequestIdent, generator_id: GeneratorId) -> Self {
+        Self {
+            request_ident,
+            generator_id,
+        }
+    }
+}
+
+impl From<GenerationIdent> for RequestIdent {
+    fn from(i: GenerationIdent) -> Self {
+        i.request_ident
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub(crate) struct RequestId(u32);
+pub struct RequestId(u32);
 
 impl_display_debug!(RequestId);
 impl_from_u32_id!(RequestId);
@@ -57,8 +82,14 @@ impl From<RequestIdent> for RequestId {
     }
 }
 
+impl From<GenerationIdent> for RequestId {
+    fn from(i: GenerationIdent) -> Self {
+        i.request_ident.into()
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ClientId(u32);
+pub struct ClientId(u32);
 
 impl_display_debug!(ClientId);
 impl_from_u32_id!(ClientId);
@@ -69,8 +100,20 @@ impl From<RequestIdent> for ClientId {
     }
 }
 
+impl From<GenerationIdent> for ClientId {
+    fn from(i: GenerationIdent) -> Self {
+        i.request_ident.into()
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub(crate) struct GeneratorId(u32);
+pub struct GeneratorId(u32);
 
 impl_display_debug!(GeneratorId);
 impl_from_u32_id!(GeneratorId);
+
+impl From<GenerationIdent> for GeneratorId {
+    fn from(i: GenerationIdent) -> Self {
+        i.generator_id
+    }
+}

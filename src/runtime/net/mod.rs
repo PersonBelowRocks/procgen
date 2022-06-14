@@ -2,6 +2,7 @@ pub(crate) mod internal;
 pub mod packets;
 
 use std::{
+    collections::HashMap,
     net::SocketAddrV4,
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -10,13 +11,17 @@ use std::{
 };
 
 use flate2::Compression;
+use tokio::sync::RwLock;
 
-use self::packets::DowncastPacket;
+use self::{internal::InternalConnection, packets::DowncastPacket};
 
 use super::{server::ServerParams, util::ClientId};
 
 type DynPacket = Box<dyn DowncastPacket>;
 type ChannelData = AddressedPacket;
+
+type Shared<T> = Arc<RwLock<T>>;
+type ConnectionMap = HashMap<ClientId, Arc<InternalConnection>>;
 
 #[derive(Debug)]
 pub(crate) struct AddressedPacket {
@@ -108,6 +113,7 @@ impl From<ServerParams> for Params {
 pub(crate) struct Networker {
     runtime: Arc<tokio::runtime::Runtime>,
     handle: Option<NetworkerHandle>,
+    connections: Shared<ConnectionMap>,
 }
 
 impl Networker {
@@ -120,6 +126,7 @@ impl Networker {
                     .unwrap(),
             ),
             handle: None,
+            connections: Default::default(),
         }
     }
 
@@ -128,9 +135,10 @@ impl Networker {
         self.handle = Some(external);
 
         let rt = self.runtime.clone();
+        let connections = self.connections.clone();
         std::thread::spawn(move || {
             let _guard = rt.enter();
-            rt.block_on(internal::run(params, internal));
+            rt.block_on(internal::run(params, internal, connections));
         });
     }
 
@@ -171,6 +179,11 @@ impl Networker {
                 .lock()
                 .unwrap(),
         }
+    }
+
+    #[inline]
+    pub fn connection(&self, id: ClientId) -> Option<Arc<InternalConnection>> {
+        self.connections.blocking_read().get(&id).cloned()
     }
 }
 

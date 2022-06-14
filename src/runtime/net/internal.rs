@@ -1,6 +1,5 @@
 use std::{
     any::type_name,
-    collections::HashMap,
     io::{Read, Write},
     net::SocketAddr,
 };
@@ -19,11 +18,9 @@ use tokio::{
 
 use super::{packets::Packet, *};
 
-type Shared<T> = Arc<RwLock<T>>;
-
 fn log_connection_error(
     result: Result<Result<(), anyhow::Error>, JoinError>,
-    conn: Arc<Connection>,
+    conn: Arc<InternalConnection>,
 ) {
     match result {
         Ok(result) => match result {
@@ -40,8 +37,12 @@ fn log_connection_error(
     }
 }
 
-pub(super) async fn run(params: Params, internal: InternalNetworkerHandle) -> ! {
-    let server = Server::create(params.addr).await;
+pub(super) async fn run(
+    params: Params,
+    internal: InternalNetworkerHandle,
+    connections: Shared<ConnectionMap>,
+) -> ! {
+    let server = Server::create(params.addr, connections).await;
 
     let mut handle = server.run(params);
     // This loop basically just transfers packets from the async stream into the sync stream, and vice versa.
@@ -63,17 +64,17 @@ struct ServerHandle {
 
 struct Server {
     listener: TcpListener,
-    connections: Shared<HashMap<ClientId, Arc<Connection>>>,
+    connections: Shared<ConnectionMap>,
 }
 
 impl Server {
-    async fn create(addr: SocketAddrV4) -> Self {
+    async fn create(addr: SocketAddrV4, connections: Shared<ConnectionMap>) -> Self {
         Self {
             listener: TcpListener::bind(addr)
                 .await
                 .expect("couldn't bind to address"),
 
-            connections: Arc::new(RwLock::new(HashMap::new())),
+            connections,
         }
     }
 
@@ -83,13 +84,14 @@ impl Server {
     }
 
     async fn random_client_id(&self) -> ClientId {
-        let mut id = 0;
         let guard = self.connections.read().await;
 
-        while guard.contains_key(&id.into()) {
-            id = rand::random::<u32>();
+        loop {
+            let id = rand::random::<u32>();
+            if !guard.contains_key(&id.into()) {
+                return id.into();
+            }
         }
-        id.into()
     }
 
     async fn handle_incoming(
@@ -101,7 +103,7 @@ impl Server {
         // random unique ID for the next connection
         let random_id = self.random_client_id().await;
 
-        let conn = Connection::new(random_id, incoming);
+        let conn = InternalConnection::new(random_id, incoming);
 
         let shared_connection = Arc::new(conn);
 
@@ -112,7 +114,7 @@ impl Server {
 
         let connections_copy = self.connections.clone();
         tokio::spawn(async move {
-            let task = tokio::spawn(Connection::run(
+            let task = tokio::spawn(InternalConnection::run(
                 shared_connection.clone(),
                 params.compression,
                 inbound_tx,
@@ -223,7 +225,7 @@ struct RawPacket {
     body: Vec<u8>,
 }
 
-struct Connection {
+pub(crate) struct InternalConnection {
     id: ClientId,
     address: SocketAddr,
     outbound_tx: RwLock<Option<tokio::sync::mpsc::Sender<AddressedPacket>>>,
@@ -232,7 +234,7 @@ struct Connection {
     writer: tokio::sync::Mutex<BufWriter<OwnedWriteHalf>>,
 }
 
-impl Connection {
+impl InternalConnection {
     fn new(id: ClientId, stream: TcpStream) -> Self {
         let (r, w) = stream.into_split();
 
@@ -385,7 +387,7 @@ impl Connection {
     }
 }
 
-impl std::fmt::Debug for Connection {
+impl std::fmt::Debug for InternalConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(type_name::<Self>())
             .field("address", &self.address)

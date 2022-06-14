@@ -7,9 +7,9 @@ use crate::{
     runtime::util::{GeneratorId, RequestId},
 };
 
-pub(crate) trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
+pub trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
 
-pub(crate) trait Packet: serde::Serialize + serde::de::DeserializeOwned {
+pub trait Packet: serde::Serialize + serde::de::DeserializeOwned {
     const ID: u16;
 }
 
@@ -18,10 +18,10 @@ impl<P> DowncastPacket for P where P: Packet + dc::Downcast + Send + Sync + std:
 dc::impl_downcast!(DowncastPacket);
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct GenerateChunk {
-    pub(crate) request_id: RequestId,
-    pub(crate) generator_id: GeneratorId,
-    pub(crate) pos: na::Vector2<i32>,
+pub struct GenerateChunk {
+    pub request_id: RequestId,
+    pub generator_id: GeneratorId,
+    pub pos: na::Vector2<i32>,
 }
 
 impl GenerateChunk {
@@ -35,9 +35,9 @@ impl Packet for GenerateChunk {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ReplyChunk {
-    pub(crate) request_id: RequestId,
-    pub(crate) chunk: Chunk,
+pub struct ReplyChunk {
+    pub request_id: RequestId,
+    pub chunk: Chunk,
 }
 
 impl Packet for ReplyChunk {
@@ -45,12 +45,12 @@ impl Packet for ReplyChunk {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct AddGenerator {
-    pub(crate) request_id: RequestId,
-    pub(crate) name: String,
-    pub(crate) min_height: i32,
-    pub(crate) max_height: i32,
-    pub(crate) default_id: BlockId,
+pub struct AddGenerator {
+    pub request_id: RequestId,
+    pub name: String,
+    pub min_height: i32,
+    pub max_height: i32,
+    pub default_id: BlockId,
 }
 
 impl AddGenerator {
@@ -70,9 +70,9 @@ impl Packet for AddGenerator {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(crate) struct ConfirmGeneratorAddition {
-    pub(crate) request_id: RequestId,
-    pub(crate) generator_id: GeneratorId,
+pub struct ConfirmGeneratorAddition {
+    pub request_id: RequestId,
+    pub generator_id: GeneratorId,
 }
 
 impl ConfirmGeneratorAddition {
@@ -86,4 +86,45 @@ impl ConfirmGeneratorAddition {
 
 impl Packet for ConfirmGeneratorAddition {
     const ID: u16 = 3;
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum ProtocolErrorKind {
+    Other {
+        details: String,
+    },
+    GeneratorNotFound {
+        generator_id: GeneratorId,
+        request_id: RequestId,
+    },
+    ChunkGenerationFailure {
+        generator_id: GeneratorId,
+        request_id: RequestId,
+        details: String,
+    },
+    Terminated {
+        details: String,
+    },
+}
+
+// TODO: finish implementing this
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolError {
+    pub kind: ProtocolErrorKind,
+    pub fatal: bool,
+}
+
+impl ProtocolError {
+    pub fn gentle(kind: ProtocolErrorKind) -> Self {
+        Self { kind, fatal: false }
+    }
+
+    pub fn fatal(kind: ProtocolErrorKind) -> Self {
+        Self { kind, fatal: true }
+    }
+}
+
+impl Packet for ProtocolError {
+    const ID: u16 = 4;
 }
