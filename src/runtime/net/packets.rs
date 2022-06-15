@@ -7,10 +7,42 @@ use crate::{
     runtime::util::{GeneratorId, RequestId},
 };
 
+use super::DynPacket;
+
+pub fn parse_dyn(buf: &[u8]) -> anyhow::Result<DynPacket> {
+    let id = u16::from_be_bytes(
+        buf.get(..2)
+            .ok_or_else(|| anyhow::anyhow!("malformed packet ID"))?
+            .try_into()?,
+    );
+
+    let buf = buf
+        .get(2..)
+        .ok_or_else(|| anyhow::anyhow!("packet is too short"))?;
+
+    match id {
+        GenerateChunk::ID => Ok(Box::new(bincode::deserialize::<GenerateChunk>(buf)?)),
+        ReplyChunk::ID => Ok(Box::new(bincode::deserialize::<ReplyChunk>(buf)?)),
+        AddGenerator::ID => Ok(Box::new(bincode::deserialize::<AddGenerator>(buf)?)),
+        ConfirmGeneratorAddition::ID => Ok(Box::new(bincode::deserialize::<
+            ConfirmGeneratorAddition,
+        >(buf)?)),
+        ProtocolError::ID => Ok(Box::new(bincode::deserialize::<ProtocolError>(buf)?)),
+
+        _ => Err(anyhow::anyhow!("invalid packet ID")),
+    }
+}
+
 pub trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
 
 pub trait Packet: serde::Serialize + serde::de::DeserializeOwned {
     const ID: u16;
+
+    fn bincode(&self) -> Vec<u8> {
+        let mut buf = Self::ID.to_be_bytes().to_vec();
+        buf.extend(bincode::serialize(self).unwrap());
+        buf
+    }
 }
 
 impl<P> DowncastPacket for P where P: Packet + dc::Downcast + Send + Sync + std::fmt::Debug {}

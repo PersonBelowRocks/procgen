@@ -1,97 +1,271 @@
-pub(crate) mod internal;
+// pub(crate) mod internal;
 pub mod packets;
 
 use std::{
     collections::HashMap,
-    net::SocketAddrV4,
+    io::{Read, Write},
+    net::{SocketAddr, SocketAddrV4},
+    ops::DerefMut,
+    sync::Arc,
+};
+
+use flate2::{
+    write::{ZlibDecoder, ZlibEncoder},
+    Compression,
+};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
+    net::{
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+        TcpListener, TcpStream,
+    },
     sync::{
-        mpsc::{self, Receiver, Sender},
-        Arc, Mutex, MutexGuard,
+        mpsc::{Receiver, Sender},
+        Mutex, MutexGuard, RwLock,
     },
 };
 
-use flate2::Compression;
-use tokio::sync::RwLock;
+use self::packets::{DowncastPacket, Packet};
 
-use self::{internal::InternalConnection, packets::DowncastPacket};
-
-use super::{server::ServerParams, util::ClientId};
+use super::{server::ServerParams, util::ConnectionId};
 
 type DynPacket = Box<dyn DowncastPacket>;
-type ChannelData = AddressedPacket;
 
 type Shared<T> = Arc<RwLock<T>>;
-type ConnectionMap = HashMap<ClientId, Arc<InternalConnection>>;
+type ConnectionMap = HashMap<ConnectionId, Connection>;
 
-#[derive(Debug)]
-pub(crate) struct AddressedPacket {
-    packet: DynPacket,
-    client_id: ClientId,
+/// Represents a packet header, containing the packet's compressed length and decompressed length.
+/// The packet's compressed length is the actual size the packet takes up in the TCP stream.
+/// For example, if a header with a compressed length of 20 is sent, that means the next 20 bytes after
+/// the header are part of a compressed packet. So a reader should read 20 bytes after the header.
+///
+/// The decompressed length should be used for error checking and optimizations.
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct Header {
+    pub(crate) compressed_len: u32,
+    pub(crate) decompressed_len: u32,
 }
 
-impl AddressedPacket {
-    pub(crate) fn new<P: DowncastPacket>(id: ClientId, packet: P) -> Self {
+impl Header {
+    pub(crate) fn new(compressed_len: u32, decompressed_len: u32) -> Self {
         Self {
-            packet: Box::new(packet),
-            client_id: id,
+            compressed_len,
+            decompressed_len,
         }
     }
 
-    pub(crate) fn downcast_ref<T: DowncastPacket>(&self) -> Option<&T> {
-        self.packet.downcast_ref()
+    pub(crate) async fn read<S: AsyncReadExt + Unpin>(s: &mut S) -> anyhow::Result<Self> {
+        let compressed_len = s.read_u32().await?;
+        let decompressed_len = s.read_u32().await?;
+
+        Ok(Self::new(compressed_len, decompressed_len))
     }
 
-    pub(crate) fn id(&self) -> ClientId {
-        self.client_id
+    pub(crate) async fn write<S: AsyncWriteExt + Unpin>(&self, s: &mut S) -> anyhow::Result<()> {
+        s.write_u32(self.compressed_len).await?;
+        s.write_u32(self.decompressed_len).await?;
+
+        Ok(())
+    }
+
+    pub(crate) fn sync_write<S: Write>(&self, s: &mut S) -> anyhow::Result<()> {
+        s.write_all(&self.compressed_len.to_be_bytes())?;
+        s.write_all(&self.decompressed_len.to_be_bytes())?;
+
+        Ok(())
+    }
+
+    pub(crate) fn sync_read<R: Read>(r: &mut R) -> anyhow::Result<Self> {
+        let comp_l = {
+            let mut buf = [0u8; 4];
+            r.read_exact(&mut buf)?;
+            u32::from_be_bytes(buf)
+        };
+
+        let decomp_l = {
+            let mut buf = [0u8; 4];
+            r.read_exact(&mut buf)?;
+            u32::from_be_bytes(buf)
+        };
+
+        Ok(Self {
+            compressed_len: comp_l,
+            decompressed_len: decomp_l,
+        })
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct Compressor {
+    level: Compression,
+}
+
+impl Compressor {
+    pub fn new(level: Compression) -> Self {
+        Self { level }
+    }
+
+    pub async fn write<S: AsyncWriteExt + Unpin>(
+        &self,
+        packet: &[u8],
+        stream: &mut S,
+    ) -> anyhow::Result<()> {
+        let decompressed_len = packet.len() as u32;
+
+        let compressed_buf = {
+            let mut buf = Vec::<u8>::new();
+            let mut encoder = ZlibEncoder::new(&mut buf, self.level);
+            encoder.write_all(packet)?;
+            encoder.finish()?;
+
+            buf
+        };
+
+        let compressed_len = compressed_buf.len() as u32;
+
+        Header::new(compressed_len, decompressed_len)
+            .write(stream)
+            .await?;
+        stream.write_all(&compressed_buf).await?;
+        stream.flush().await?;
+
+        Ok(())
+    }
+
+    pub async fn read<S: AsyncReadExt + Unpin>(&self, stream: &mut S) -> anyhow::Result<Vec<u8>> {
+        let header = Header::read(stream).await?;
+
+        let compressed_buf = {
+            let mut buf = vec![0u8; header.compressed_len as usize];
+
+            stream.read_exact(&mut buf).await?;
+
+            buf
+        };
+
+        let decompressed_buf = {
+            let mut buf = Vec::with_capacity(header.decompressed_len as usize);
+
+            let mut decoder = ZlibDecoder::new(&mut buf);
+            decoder.write_all(&compressed_buf)?;
+            decoder.finish()?;
+
+            buf
+        };
+
+        Ok(decompressed_buf)
+    }
+}
+
+pub struct ConnectionIncoming<'a> {
+    guard: MutexGuard<'a, Receiver<Vec<u8>>>,
+}
+
+impl<'a> Iterator for ConnectionIncoming<'a> {
+    type Item = Vec<u8>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.guard.try_recv().ok()
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct NetworkerHandle {
-    inbound: Arc<Mutex<Receiver<ChannelData>>>,
-    outbound: Sender<ChannelData>,
+pub struct Connection {
+    read: Arc<Mutex<BufReader<OwnedReadHalf>>>,
+    read_rx: Option<Arc<Mutex<Receiver<Vec<u8>>>>>,
+
+    write: Arc<Mutex<BufWriter<OwnedWriteHalf>>>,
+    write_tx: Option<Arc<Mutex<Sender<Vec<u8>>>>>,
+
+    compressor: Compressor,
+    id: ConnectionId,
 }
 
-impl NetworkerHandle {
-    fn new(rx_inbound: Receiver<ChannelData>, tx_outbound: Sender<ChannelData>) -> Self {
+impl Connection {
+    pub fn new(stream: TcpStream, compression: Compression) -> Self {
+        let addr = stream.peer_addr().unwrap();
+        let (read, write) = stream.into_split();
+
+        let id = {
+            match addr {
+                SocketAddr::V4(addr) => ConnectionId(addr),
+                _ => panic!("invalid address"),
+            }
+        };
+
         Self {
-            inbound: Arc::new(Mutex::new(rx_inbound)),
-            outbound: tx_outbound,
+            read: Mutex::new(BufReader::new(read)).into(),
+            read_rx: None,
+            write: Mutex::new(BufWriter::new(write)).into(),
+            write_tx: None,
+            compressor: Compressor::new(compression),
+            id,
         }
     }
-}
 
-#[derive(Clone)]
-pub(self) struct InternalNetworkerHandle {
-    inbound: Arc<Mutex<Sender<ChannelData>>>,
-    outbound: Arc<Mutex<Receiver<ChannelData>>>,
-}
+    pub fn id(&self) -> ConnectionId {
+        self.id
+    }
 
-impl InternalNetworkerHandle {
-    fn new(tx_inbound: Sender<ChannelData>, rx_outbound: Receiver<ChannelData>) -> Self {
-        Self {
-            inbound: Arc::new(Mutex::new(tx_inbound)),
-            outbound: Arc::new(Mutex::new(rx_outbound)),
+    pub async fn send_packet<P: Packet>(&self, packet: &P) -> anyhow::Result<()> {
+        let raw = packet.bincode();
+
+        self.write_tx
+            .as_ref()
+            .unwrap()
+            .lock()
+            .await
+            .send(raw)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn incoming(&self) -> ConnectionIncoming<'_> {
+        ConnectionIncoming {
+            guard: self.read_rx.as_ref().unwrap().lock().await,
         }
     }
 
-    fn send(&self, packet: ChannelData) {
-        self.inbound.lock().unwrap().send(packet).unwrap();
+    pub fn run(&mut self) {
+        assert!(
+            (self.read_rx.is_none() && self.write_tx.is_none()),
+            "cannot run connection twice!"
+        );
+
+        let (read_tx, read_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+        let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+
+        self.read_rx = Some(Arc::new(Mutex::new(read_rx)));
+        self.write_tx = Some(Arc::new(Mutex::new(write_tx)));
+
+        // Reader
+        let reader = self.read.clone();
+        let compressor = self.compressor;
+        tokio::spawn(async move {
+            loop {
+                let raw = compressor
+                    .read(reader.lock().await.deref_mut())
+                    .await
+                    .unwrap();
+                read_tx.send(raw).await.unwrap();
+            }
+        });
+
+        // Writer
+        let writer = self.write.clone();
+        let compressor = self.compressor;
+        tokio::spawn(async move {
+            loop {
+                if let Some(raw) = write_rx.recv().await {
+                    compressor
+                        .write(&raw, writer.lock().await.deref_mut())
+                        .await
+                        .unwrap();
+                }
+            }
+        });
     }
-
-    fn receive(&self) -> Option<ChannelData> {
-        self.outbound.lock().unwrap().try_recv().ok()
-    }
-}
-
-fn make_handles() -> (NetworkerHandle, InternalNetworkerHandle) {
-    let (tx_i, rx_i) = mpsc::channel::<ChannelData>();
-    let (tx_o, rx_o) = mpsc::channel::<ChannelData>();
-
-    (
-        NetworkerHandle::new(rx_i, tx_o),
-        InternalNetworkerHandle::new(tx_i, rx_o),
-    )
 }
 
 #[derive(Copy, Clone)]
@@ -111,261 +285,77 @@ impl From<ServerParams> for Params {
 
 #[derive(Clone)]
 pub(crate) struct Networker {
-    runtime: Arc<tokio::runtime::Runtime>,
-    handle: Option<NetworkerHandle>,
+    params: Params,
+    listener: Option<Arc<Mutex<TcpListener>>>,
     connections: Shared<ConnectionMap>,
 }
 
 impl Networker {
-    pub fn new() -> Self {
+    pub fn new(params: Params) -> Self {
         Self {
-            runtime: Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap(),
-            ),
-            handle: None,
-            connections: Default::default(),
+            params,
+            listener: None,
+            connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub fn run(&mut self, params: Params) {
-        let (external, internal) = make_handles();
-        self.handle = Some(external);
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        assert!(self.listener.is_none(), "cannot start networker twice!");
 
-        let rt = self.runtime.clone();
+        let listener = Arc::new(Mutex::new(TcpListener::bind(self.params.addr).await?));
+        self.listener = Some(listener.clone());
+
         let connections = self.connections.clone();
-        std::thread::spawn(move || {
-            let _guard = rt.enter();
-            rt.block_on(internal::run(params, internal, connections));
+        let compression = self.params.compression;
+
+        tokio::spawn(async move {
+            loop {
+                let (incoming, _) = listener.lock().await.accept().await.unwrap();
+
+                let mut conn = Connection::new(incoming, compression);
+
+                log::info!("accepted connection from {}", conn.id());
+
+                conn.run();
+                connections.write().await.insert(conn.id(), conn);
+            }
         });
+
+        Ok(())
     }
 
-    pub fn handle(&self) -> NetworkerHandle {
-        self.handle.clone().unwrap()
+    pub async fn stop(&mut self) -> anyhow::Result<()> {
+        todo!()
     }
 
-    #[inline]
-    pub fn send(&self, packet: AddressedPacket) {
-        self.handle
-            .as_ref()
-            .expect("Networker must be started with Networker::run() before packets are sent")
-            .outbound
-            .send(packet)
-            .unwrap()
-    }
+    pub async fn incoming(&self) -> Incoming {
+        let guard = self.connections.read().await;
+        let mut packets = Vec::new();
 
-    #[inline]
-    pub fn poll(&self) -> Option<AddressedPacket> {
-        self.handle
-            .as_ref()
-            .expect("Networker must be started with Networker::run() before packets are read")
-            .inbound
-            .lock()
-            .unwrap()
-            .try_recv()
-            .ok()
-    }
-
-    #[inline]
-    pub fn incoming(&self) -> Incoming<'_> {
-        Incoming {
-            guard: self
-                .handle
-                .as_ref()
-                .expect("Networker must be started with Networker::run() before packets are read")
-                .inbound
-                .lock()
-                .unwrap(),
+        for (_, conn) in guard.iter() {
+            packets.extend(
+                conn.incoming()
+                    .await
+                    .map(|p| (conn.clone(), packets::parse_dyn(&p))),
+            );
         }
+
+        Incoming(packets.into_iter())
     }
 
     #[inline]
-    pub fn connection(&self, id: ClientId) -> Option<Arc<InternalConnection>> {
-        self.connections.blocking_read().get(&id).cloned()
+    pub async fn connection(&self, id: ConnectionId) -> Option<Connection> {
+        self.connections.read().await.get(&id).cloned()
     }
 }
 
-pub(crate) struct Incoming<'a> {
-    guard: MutexGuard<'a, Receiver<AddressedPacket>>,
-}
+pub struct Incoming(std::vec::IntoIter<(Connection, anyhow::Result<DynPacket>)>);
 
-impl<'a> Iterator for Incoming<'a> {
-    type Item = AddressedPacket;
+impl Iterator for Incoming {
+    type Item = (Connection, anyhow::Result<DynPacket>);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.guard.try_recv().ok()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{
-        io::{Read, Write},
-        net::TcpStream,
-        time::Duration,
-    };
-
-    use flate2::{read::ZlibDecoder, write::ZlibEncoder};
-    use volume::Volume;
-
-    use crate::chunk::{Chunk, Spaces};
-
-    use super::{
-        internal::Header,
-        packets::{GenerateChunk, Packet, ReplyChunk},
-        *,
-    };
-
-    // TODO: this test is great and all, but we should also have some tests for more abnormal behaviour, like malformed packets
-    #[test]
-    fn networker_recv() {
-        let mut networker = Networker::new();
-
-        let params = Params {
-            addr: "0.0.0.0:33445".parse().unwrap(),
-            compression: Compression::best(),
-        };
-
-        networker.run(params);
-
-        let mut stream =
-            TcpStream::connect("127.0.0.1:33445".parse::<SocketAddrV4>().unwrap()).unwrap();
-        let packet = packets::AddGenerator {
-            request_id: 42.into(),
-            name: "hello!!!".to_string(),
-            min_height: -64,
-            max_height: 320,
-            default_id: 0.into(),
-        };
-
-        let packet_id = packets::AddGenerator::ID;
-        let packet_body = bincode::serialize(&packet).unwrap();
-
-        let mut uncompressed_buf = packet_id.to_be_bytes().to_vec();
-        uncompressed_buf.extend(packet_body);
-
-        let decompressed_len = uncompressed_buf.len();
-
-        let mut compressed_buf = Vec::<u8>::new();
-        let mut compressor = ZlibEncoder::new(&mut compressed_buf, Compression::best());
-        compressor.write_all(&uncompressed_buf).unwrap();
-        compressor.finish().unwrap();
-
-        let compressed_len = compressed_buf.len();
-
-        let header = Header::new(compressed_len as u32, decompressed_len as u32);
-
-        header.sync_write(&mut stream).unwrap();
-        stream.write_all(&compressed_buf).unwrap();
-
-        match networker
-            .handle()
-            .inbound
-            .lock()
-            .unwrap()
-            .recv_timeout(Duration::from_secs(1))
-        {
-            Ok(p) => {
-                let packet = p.packet.downcast_ref::<packets::AddGenerator>().unwrap();
-                assert_eq!(packet.name, "hello!!!");
-                assert_eq!(packet.request_id, 42.into());
-            }
-
-            Err(error) => {
-                panic!("Receive error in networker handle: {}", error);
-            }
-        };
-    }
-
-    #[test]
-    fn networker_send() {
-        let mut networker = Networker::new();
-
-        let params = Params {
-            addr: "0.0.0.0:33446".parse().unwrap(),
-            compression: Compression::best(),
-        };
-
-        networker.run(params);
-
-        let mut stream =
-            TcpStream::connect("127.0.0.1:33446".parse::<SocketAddrV4>().unwrap()).unwrap();
-
-        let generate_chunk_packet = GenerateChunk {
-            request_id: 560.into(),
-            generator_id: 4.into(),
-            pos: na::vector![-6, 2],
-        };
-
-        let packet_id = GenerateChunk::ID;
-        let packet_body = bincode::serialize(&generate_chunk_packet).unwrap();
-
-        {
-            let mut uncompressed_buf = packet_id.to_be_bytes().to_vec();
-            uncompressed_buf.extend(packet_body);
-
-            let decompressed_len = uncompressed_buf.len();
-
-            let mut compressed_buf = Vec::<u8>::new();
-            let mut compressor = ZlibEncoder::new(&mut compressed_buf, Compression::best());
-            compressor.write_all(&uncompressed_buf).unwrap();
-            compressor.finish().unwrap();
-
-            let compressed_len = compressed_buf.len();
-
-            let header = Header::new(compressed_len as u32, decompressed_len as u32);
-
-            header.sync_write(&mut stream).unwrap();
-            stream.write_all(&compressed_buf).unwrap();
-        }
-
-        let client_id = networker
-            .handle()
-            .inbound
-            .lock()
-            .unwrap()
-            .recv_timeout(Duration::from_secs(1))
-            .unwrap()
-            .client_id;
-
-        let mut chunk = Chunk::new(77.into(), na::vector![-6, 2], -64, 320);
-        chunk.set(Spaces::Cs([10i32, 120, 8]), 80.into());
-        chunk.set(Spaces::Cs([6i32, -20, 9]), 92.into());
-
-        let chunk_packet = ReplyChunk {
-            request_id: 560.into(),
-            chunk: chunk.clone(),
-        };
-
-        let sent_packet = AddressedPacket {
-            client_id,
-            packet: Box::new(chunk_packet),
-        };
-
-        networker.send(sent_packet);
-
-        let recved_packet = {
-            let header = Header::sync_read(&mut stream).unwrap();
-            let mut buf = vec![0u8; header.compressed_len as usize];
-
-            stream.read_exact(&mut buf).unwrap();
-            let decompressed_buf = {
-                let mut decompressor = ZlibDecoder::new(&buf[..]);
-                let mut buf = Vec::<u8>::new();
-                decompressor.read_to_end(&mut buf).unwrap();
-                buf
-            };
-
-            let id = u16::from_be_bytes(decompressed_buf[..2].try_into().unwrap());
-            assert_eq!(id, ReplyChunk::ID);
-
-            bincode::deserialize::<ReplyChunk>(&decompressed_buf[2..]).unwrap()
-        };
-
-        assert_eq!(recved_packet.request_id, 560.into());
-        assert_eq!(recved_packet.chunk, chunk);
+        self.0.next()
     }
 }

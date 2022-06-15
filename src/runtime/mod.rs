@@ -3,3 +3,6 @@
 mod net;
 mod server;
 mod util;
+
+#[cfg(test)]
+mod tests;

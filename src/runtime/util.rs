@@ -1,3 +1,5 @@
+use std::net::SocketAddrV4;
+
 macro_rules! impl_display_debug {
     ($t:ty) => {
         impl std::fmt::Display for $t {
@@ -33,11 +35,11 @@ macro_rules! impl_from_u32_id {
 #[derive(Copy, Clone, Debug, Hash, PartialEq)]
 pub struct RequestIdent {
     pub request_id: RequestId,
-    pub client_id: ClientId,
+    pub client_id: ConnectionId,
 }
 
 impl RequestIdent {
-    pub fn new(request_id: RequestId, client_id: ClientId) -> Self {
+    pub fn new(request_id: RequestId, client_id: ConnectionId) -> Self {
         Self {
             request_id,
             client_id,
@@ -89,18 +91,17 @@ impl From<GenerationIdent> for RequestId {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct ClientId(u32);
+pub struct ConnectionId(pub SocketAddrV4);
 
-impl_display_debug!(ClientId);
-impl_from_u32_id!(ClientId);
+impl_display_debug!(ConnectionId);
 
-impl From<RequestIdent> for ClientId {
+impl From<RequestIdent> for ConnectionId {
     fn from(i: RequestIdent) -> Self {
         i.client_id
     }
 }
 
-impl From<GenerationIdent> for ClientId {
+impl From<GenerationIdent> for ConnectionId {
     fn from(i: GenerationIdent) -> Self {
         i.request_ident.into()
     }

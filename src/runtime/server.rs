@@ -3,14 +3,15 @@ use std::{
     net::SocketAddrV4,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender},
-        Arc, Mutex, MutexGuard,
+        Arc,
     },
 };
 
 use anyhow::Error;
 use flate2::Compression;
 use threadpool::ThreadPool;
+use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::Mutex;
 
 use crate::{
     chunk::Chunk,
@@ -21,12 +22,13 @@ use crate::{
 
 use super::{
     net::{
-        packets::{self, ReplyChunk},
-        AddressedPacket, Networker,
+        packets::{self, ProtocolError, ProtocolErrorKind, ReplyChunk},
+        Networker,
     },
     util::{GenerationIdent, GeneratorId, RequestIdent},
 };
 
+#[derive(Debug)]
 enum GenerationResult {
     Success(GenerationIdent, Chunk),
     Failure(GenerationIdent, Error),
@@ -48,15 +50,13 @@ impl GenerationResult {
     }
 }
 
-struct CompletedChunksIterator<'a> {
-    rx: MutexGuard<'a, Receiver<GenerationResult>>,
-}
+struct CompletedChunksIterator(std::vec::IntoIter<GenerationResult>);
 
-impl<'a> Iterator for CompletedChunksIterator<'a> {
+impl Iterator for CompletedChunksIterator {
     type Item = GenerationResult;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.rx.try_recv().ok()
+        self.0.next()
     }
 }
 
@@ -74,10 +74,15 @@ struct ChunkReceiver {
 }
 
 impl ChunkReceiver {
-    fn completed(&self) -> CompletedChunksIterator<'_> {
-        CompletedChunksIterator {
-            rx: self.rx.lock().unwrap(),
+    async fn completed(&self) -> CompletedChunksIterator {
+        let mut chunks = Vec::new();
+        let mut guard = self.rx.lock().await;
+
+        while let Ok(chunk_result) = guard.try_recv() {
+            chunks.push(chunk_result);
         }
+
+        CompletedChunksIterator(chunks.into_iter())
     }
 }
 
@@ -98,7 +103,7 @@ impl GeneratorManager {
             instances: HashMap::new(),
             workers: Mutex::new(Default::default()),
             channel_pair: {
-                let (tx, rx) = mpsc::channel::<GenerationResult>();
+                let (tx, rx) = mpsc::channel::<GenerationResult>(128);
                 (tx, Arc::new(Mutex::new(rx)))
             },
         }
@@ -142,7 +147,7 @@ impl GeneratorManager {
         Ok(id)
     }
 
-    pub fn submit_chunk(
+    pub async fn submit_chunk(
         &self,
         request_ident: RequestIdent,
         generator_id: GeneratorId,
@@ -155,21 +160,26 @@ impl GeneratorManager {
             .ok_or(ManagerSubmitError(generator_id))?
             .clone();
 
-        self.workers.lock().unwrap().execute(move || {
+        self.workers.lock().await.execute(move || {
             let result = GenerationResult::from_result(
                 instance.generate(&args),
                 request_ident.generation_ident(generator_id),
             );
-            tx.send(result).unwrap();
+            tx.blocking_send(result).unwrap();
         });
 
         Ok(())
     }
 
-    pub fn completed(&self) -> CompletedChunksIterator<'_> {
-        CompletedChunksIterator {
-            rx: self.channel_pair.1.lock().unwrap(),
+    pub async fn completed(&self) -> CompletedChunksIterator {
+        let mut chunks = Vec::new();
+        let mut guard = self.channel_pair.1.lock().await;
+
+        while let Some(chunk_result) = guard.recv().await {
+            chunks.push(chunk_result);
         }
+
+        CompletedChunksIterator(chunks.into_iter())
     }
 
     pub fn add_factory(&mut self, name: &'static str, factory: Box<dyn DynGeneratorFactory>) {
@@ -177,6 +187,7 @@ impl GeneratorManager {
     }
 }
 
+#[derive(Copy, Clone)]
 pub struct ServerParams {
     pub(crate) addr: SocketAddrV4,
     pub(crate) compression: Compression,
@@ -193,7 +204,7 @@ pub struct Server {
 impl Server {
     pub fn new(params: ServerParams) -> Self {
         Self {
-            net: Networker::new(),
+            net: Networker::new(params.into()),
             generators: Mutex::new(GeneratorManager::new()).into(),
             params,
             running: Arc::new(AtomicBool::from(false)),
@@ -204,14 +215,14 @@ impl Server {
         self.running.store(false, Ordering::SeqCst)
     }
 
-    pub fn add_generator<G: ChunkGenerator>(&mut self) {
+    pub async fn add_generator<G: ChunkGenerator>(&mut self) {
         if self.running.load(Ordering::SeqCst) {
             panic!("Cannot add new generator while server is running!");
         }
 
         self.generators
             .lock()
-            .unwrap()
+            .await
             .add_factory(G::NAME, Box::new(G::factory()));
     }
 
@@ -225,38 +236,60 @@ impl Server {
         let manager = self.generators.clone();
 
         // This thread submits chunks for generation and registers generators at the request of clients.
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
                 // Coarsen the atomic access so the loop can be faster.
                 for _ in 0..coarsening {
-                    for incoming in net.incoming() {
-                        if let Some(packet) = incoming.downcast_ref::<packets::GenerateChunk>() {
-                            let request_ident = RequestIdent::new(packet.request_id, incoming.id());
+                    for (conn, packet) in net.incoming().await {
+                        match packet {
+                            Ok(packet) => {
+                                if let Some(packet) =
+                                    packet.downcast_ref::<packets::GenerateChunk>()
+                                {
+                                    let request_ident =
+                                        RequestIdent::new(packet.request_id, conn.id());
 
-                            if let Err(error) = manager.lock().unwrap().submit_chunk(
-                                request_ident,
-                                packet.generator_id,
-                                packet.args(),
-                            ) {
-                                log::error!("Request {request_ident:?} failed when submitting chunk for generation: {error}");
+                                    {
+                                        if let Err(error) = manager
+                                            .lock()
+                                            .await
+                                            .submit_chunk(
+                                                request_ident,
+                                                packet.generator_id,
+                                                packet.args(),
+                                            )
+                                            .await
+                                        {
+                                            log::error!("Request {request_ident:?} failed when submitting chunk for generation: {error}");
+                                        }
+                                    }
+                                }
+
+                                if let Some(packet) = packet.downcast_ref::<packets::AddGenerator>()
+                                {
+                                    let request_ident =
+                                        RequestIdent::new(packet.request_id, conn.id());
+
+                                    if let Ok(generator_id) = manager
+                                        .lock()
+                                        .await
+                                        .register_generator(&packet.name, packet.factory_params())
+                                    {
+                                        conn.send_packet(&packets::ConfirmGeneratorAddition::new(
+                                            request_ident.request_id,
+                                            generator_id,
+                                        ))
+                                        .await
+                                        .unwrap();
+                                    }
+                                }
                             }
-                        }
-
-                        if let Some(packet) = incoming.downcast_ref::<packets::AddGenerator>() {
-                            let request_ident = RequestIdent::new(packet.request_id, incoming.id());
-
-                            if let Ok(generator_id) = manager
-                                .lock()
-                                .unwrap()
-                                .register_generator(&packet.name, packet.factory_params())
-                            {
-                                net.send(AddressedPacket::new(
-                                    request_ident.client_id,
-                                    packets::ConfirmGeneratorAddition::new(
-                                        request_ident.request_id,
-                                        generator_id,
-                                    ),
-                                ));
+                            Err(error) => {
+                                conn.send_packet(&ProtocolError::fatal(ProtocolErrorKind::Other {
+                                    details: error.to_string(),
+                                }))
+                                .await
+                                .unwrap();
                             }
                         }
                     }
@@ -267,24 +300,27 @@ impl Server {
 
     /// Start the distributor thread for generated chunks. This thread collects chunks from the generator pool and
     /// sends them to their respective clients.
-    fn start_chunk_distributor(&self) {
+    async fn start_chunk_distributor(&self) {
         let coarsening = self.params.coarsening;
 
-        let receiver = self.generators.lock().unwrap().receiver();
+        let receiver = self.generators.lock().await.receiver();
         let net = self.net.clone();
         let running = self.running.clone();
 
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
                 for _ in 0..coarsening {
-                    for completed in receiver.completed() {
+                    for completed in receiver.completed().await.collect::<Vec<_>>().into_iter() {
                         match completed {
                             GenerationResult::Success(ident, chunk) => {
                                 let packet = ReplyChunk {
                                     request_id: ident.into(),
                                     chunk,
                                 };
-                                net.send(AddressedPacket::new(ident.into(), packet));
+
+                                if let Some(conn) = net.connection(ident.into()).await {
+                                    conn.send_packet(&packet).await.unwrap();
+                                }
                             }
                             GenerationResult::Failure(ident, error) => {
                                 log::error!("Request {ident:?} failed: {error}");
@@ -298,191 +334,16 @@ impl Server {
         });
     }
 
-    pub fn run(&mut self) {
+    pub async fn run(&mut self) {
         if self.running.load(Ordering::SeqCst) {
             panic!("Server is already running")
         }
 
         self.running.store(true, Ordering::SeqCst);
 
-        self.net.run(super::net::Params {
-            addr: self.params.addr,
-            compression: self.params.compression,
-        });
+        self.net.run().await.unwrap();
 
         self.start_client_request_handler();
-        self.start_chunk_distributor();
-
-        // todo!()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{
-        io::{Read, Write},
-        net::TcpStream,
-    };
-
-    use flate2::{read::ZlibDecoder, write::ZlibEncoder};
-    use volume::Volume;
-
-    use crate::{
-        block::BlockId,
-        chunk::Spaces,
-        generation::GeneratorFactory,
-        runtime::net::{internal::Header, packets::Packet},
-    };
-
-    use super::*;
-
-    struct MockGenFactory;
-
-    impl GeneratorFactory for MockGenFactory {
-        type Generator = MockGenerator;
-
-        fn create(&self, params: FactoryParameters<'_>) -> Self::Generator {
-            MockGenerator {
-                min_height: params.min_height,
-                max_height: params.max_height,
-                default_id: params.default,
-            }
-        }
-    }
-
-    struct MockGenerator {
-        min_height: i32,
-        max_height: i32,
-        default_id: BlockId,
-    }
-
-    impl ChunkGenerator for MockGenerator {
-        const NAME: &'static str = "MOCK_GENERATOR";
-
-        type Factory = MockGenFactory;
-
-        fn generate(&self, args: &GenerationArgs) -> anyhow::Result<Chunk> {
-            let mut chunk = Chunk::new(self.default_id, args.pos, self.min_height, self.max_height);
-
-            for x in 0..16 {
-                for z in 0..16 {
-                    chunk.set(Spaces::Cs([x, self.min_height, z]), 80.into());
-                }
-            }
-
-            Ok(chunk)
-        }
-
-        fn factory() -> Self::Factory {
-            MockGenFactory
-        }
-    }
-
-    struct MockClient {
-        stream: TcpStream,
-    }
-
-    impl MockClient {
-        fn new(addr: SocketAddrV4) -> Self {
-            Self {
-                stream: TcpStream::connect(addr).unwrap(),
-            }
-        }
-
-        fn send_packet<P: Packet>(&mut self, packet: &P) -> anyhow::Result<()> {
-            let mut buf = P::ID.to_be_bytes().to_vec();
-            buf.extend(bincode::serialize(packet)?);
-
-            let decompressed_len = buf.len();
-
-            let compressed_buf = {
-                let mut compressed_buf = Vec::<u8>::new();
-                let mut compressor = ZlibEncoder::new(&mut compressed_buf, Compression::best());
-                compressor.write_all(&buf)?;
-                compressor.finish()?;
-
-                compressed_buf
-            };
-
-            let header = Header::new(compressed_buf.len() as u32, decompressed_len as u32);
-
-            header.sync_write(&mut self.stream)?;
-            self.stream.write_all(&compressed_buf)?;
-
-            Ok(())
-        }
-
-        fn read_packet<P: Packet>(&mut self) -> anyhow::Result<P> {
-            let header = Header::sync_read(&mut self.stream)?;
-            let mut compressed_buf = vec![0u8; header.compressed_len as usize];
-
-            self.stream.read_exact(&mut compressed_buf)?;
-
-            let decompressed_buf = {
-                let mut buf = Vec::<u8>::with_capacity(header.decompressed_len as usize);
-                let mut decompressor = ZlibDecoder::new(&compressed_buf[..]);
-
-                decompressor.read_to_end(&mut buf)?;
-                buf
-            };
-
-            let packet = bincode::deserialize::<P>(&decompressed_buf[2..])?;
-            Ok(packet)
-        }
-    }
-
-    #[test]
-    fn end_to_end_server_test() {
-        let params = ServerParams {
-            addr: "0.0.0.0:33443".parse().unwrap(),
-            compression: Compression::best(),
-            coarsening: 100,
-        };
-
-        let mut server = Server::new(params);
-
-        server.add_generator::<MockGenerator>();
-
-        server.run();
-
-        let mut client = MockClient::new("127.0.0.1:33443".parse().unwrap());
-
-        client
-            .send_packet(&packets::AddGenerator {
-                request_id: 500.into(),
-                name: MockGenerator::NAME.to_string(),
-                min_height: -64,
-                max_height: 320,
-                default_id: 21.into(),
-            })
-            .unwrap();
-
-        let generator_id = {
-            let packet = client
-                .read_packet::<packets::ConfirmGeneratorAddition>()
-                .unwrap();
-            assert_eq!(packet.request_id, 500.into());
-            packet.generator_id
-        };
-
-        client
-            .send_packet(&packets::GenerateChunk {
-                request_id: 420.into(),
-                generator_id,
-                pos: na::vector![6i32, 4],
-            })
-            .unwrap();
-
-        let packet = client.read_packet::<packets::ReplyChunk>().unwrap();
-        assert_eq!(packet.request_id, 420.into());
-
-        for x in 0..16 {
-            for z in 0..16 {
-                assert_eq!(
-                    packet.chunk.get(Spaces::Cs([x, -64, z])),
-                    Some(&BlockId::new(80))
-                );
-            }
-        }
+        self.start_chunk_distributor().await;
     }
 }

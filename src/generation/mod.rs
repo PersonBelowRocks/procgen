@@ -21,7 +21,7 @@ pub struct FactoryParameters<'a> {
     // TODO: this should have a seed field too for RNG
 }
 
-pub trait DynGeneratorFactory: Send {
+pub trait DynGeneratorFactory: Send + Sync {
     fn create(&self, params: FactoryParameters<'_>) -> Box<dyn DynChunkGenerator>;
 }
 
@@ -32,7 +32,7 @@ impl<T: GeneratorFactory> DynGeneratorFactory for T {
     }
 }
 
-pub trait GeneratorFactory: Send + 'static {
+pub trait GeneratorFactory: Send + Sync + 'static {
     type Generator: ChunkGenerator;
 
     fn create(&self, params: FactoryParameters<'_>) -> Self::Generator;
