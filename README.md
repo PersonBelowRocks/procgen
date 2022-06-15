@@ -1,18 +1,40 @@
-### Messing around with procedural generation in Rust.
-This repository is going to serve as a place to keep a bunch of neat procedural generation related stuff.
-I have vague plans of writing a little protocol + client/server that'll allow me to have a server (written in Rust hopefully btw btw)
-which will generate and send terrain at the request of a client, which will be implemented as a Minecraft (Spigot) plugin.
-Reasons being:
-  1. World generation is very fun to mess around with but can be slow and inefficient. Because Minecraft is already laggy
-  as hell in its current state, offloading large parts of this ordeal to an external server could reduce the load on the
-  main server so it has more time to lag around with other (more important) things instead.
-  2. Writing any mathematical code in Java is uh... undesirable, to put it mildly. Kotlin doesn't really help this issue either
-  despite having operator overloading because there's not really any libraries that are ergonomic enough for me out there (im very picky).
-  3. "you can use rust for this, btw, btw, btw". One thing I really like about Rust (maybe even more so than the AMAZING compile-time memory safety,
-  fearless concurrency, and zero-cost abstractions) is the ergonomics of the language, especially when it comes to math! The type system really
-  helps this with crates like [num-traits](https://crates.io/crates/num-traits), and there's also the lovely [nalgebra](https://crates.io/crates/nalgebra)
-  crate for linear algebra which I find quite satisfying too.
+### Minecraft procedural terrain generation server.
+This is an attempt at making a terrain generation server for Minecraft in Rust.
+The system (hopefully) works like this:
+- A terrain server is started and equipped with some terrain generators.
+- Some Minecraft server with a terrain client (in the form of a plugin) connects to the terrain server when it feels like it.
+- The client then (should) request to create a generator instance on the server, the client will specify various parameters for the instance in the packet.
+- This will make the terrain server invoke the generator's factory, creating a new instance with the parameters provided by the client.
+- The server then replies to the client with a "generator ID", a unique ID for the instance it just created.
+- The client is responsible for keeping track of generator IDs for the generator instances that it has created.
+- After an instance has been created the client may send a "generation request" packet to the server, specifying the location of the chunk it wants generated
+and the generator ID of the instance it wants to generate the chunk with.
+- The server then uses the instance to generate the chunk, and sends it back to the client.
 
+When a client requests to create a generator instance or requests to generate a chunk, it must provide a "request ID" for the request.
+Later, when the server replies, it'll attach this ID to identify what request the packet is related to.
+The client is responsible for keeping track of which request IDs refer to which requests.
 
-# Server Branch
-This branch is going to be the server implementation, and will also move away from using an ECS.
+The system should (fingers crossed) allow clients to use the server to generate all sorts of different terrain, and use multiple generators.
+One scenario where this would be useful is having different generators for different dimensions (one nether, one end, one overworld).
+
+# Progress and plans
+Currently the server is "usable", but there is no client or plugin for it. 
+The server is also riddled with various bugs, for example:
+- A client can access a generator instance of another client if they know the instance's ID.
+- A client can trigger a panic in the server by doing various simple things (like a malformed packet).
+- There's no way to really terminate a running server at the moment, so the only choice is to crash.
+
+There's many more bugs on top of this, most of which are just there because I'm very lazy and just want to see it work first.
+
+Plans for the future include:
+- A standalone crate for the networking functionality (mainly just for packets).
+- A client/plugin to use on a Minecraft server.
+- An API for writing generators more easily, lots of fun to be had here!
+- An API or maybe even an own component for structure generation (villages, strongholds, etc.). It'd be cool to import
+schematica files for this, so you'd build structures in-game and just import them and the server would do the rest.
+- (big maybe for this one!) A system for generating all sorts of stuff, and at any time, not just chunks. For example,
+the server could generate trees for you and you had a plugin to just grab procedural trees from the server and place them in the world.
+Very nice for building and terraforming!
+- General improvements and cleanup. Everything from code quality to performance to documentation!
+
