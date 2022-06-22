@@ -10,7 +10,6 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::Duration,
 };
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
