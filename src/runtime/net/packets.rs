@@ -1,4 +1,8 @@
-use std::marker::PhantomData;
+use std::{
+    io::{self, Read},
+    marker::PhantomData,
+    mem::size_of,
+};
 
 use crate::{
     block::BlockId,
@@ -9,25 +13,15 @@ use crate::{
 
 use super::DynPacket;
 
-pub fn parse_dyn(buf: &[u8]) -> anyhow::Result<DynPacket> {
-    let id = u16::from_be_bytes(
-        buf.get(..2)
-            .ok_or_else(|| anyhow::anyhow!("malformed packet ID"))?
-            .try_into()?,
-    );
-
-    let buf = buf
-        .get(2..)
-        .ok_or_else(|| anyhow::anyhow!("packet is too short"))?;
+pub fn parse_dyn(buf: &PacketBuffer) -> anyhow::Result<DynPacket> {
+    let id = buf.id();
 
     match id {
-        GenerateChunk::ID => Ok(Box::new(bincode::deserialize::<GenerateChunk>(buf)?)),
-        ReplyChunk::ID => Ok(Box::new(bincode::deserialize::<ReplyChunk>(buf)?)),
-        AddGenerator::ID => Ok(Box::new(bincode::deserialize::<AddGenerator>(buf)?)),
-        ConfirmGeneratorAddition::ID => Ok(Box::new(bincode::deserialize::<
-            ConfirmGeneratorAddition,
-        >(buf)?)),
-        ProtocolError::ID => Ok(Box::new(bincode::deserialize::<ProtocolError>(buf)?)),
+        GenerateChunk::ID => Ok(Box::new(buf.to_packet::<GenerateChunk>()?)),
+        ReplyChunk::ID => Ok(Box::new(buf.to_packet::<ReplyChunk>()?)),
+        AddGenerator::ID => Ok(Box::new(buf.to_packet::<AddGenerator>()?)),
+        ConfirmGeneratorAddition::ID => Ok(Box::new(buf.to_packet::<ConfirmGeneratorAddition>()?)),
+        ProtocolError::ID => Ok(Box::new(buf.to_packet::<ProtocolError>()?)),
 
         _ => Err(anyhow::anyhow!("invalid packet ID")),
     }
@@ -38,16 +32,77 @@ pub trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
 pub trait Packet: serde::Serialize + serde::de::DeserializeOwned {
     const ID: u16;
 
-    fn bincode(&self) -> Vec<u8> {
-        let mut buf = Self::ID.to_be_bytes().to_vec();
-        buf.extend(bincode::serialize(self).unwrap());
-        buf
+    fn to_bincode(&self) -> Result<PacketBuffer, PacketBufferError> {
+        PacketBuffer::from_packet(self)
+    }
+
+    fn from_bincode(buf: &PacketBuffer) -> Result<Self, PacketBufferError> {
+        buf.to_packet()
     }
 }
 
 impl<P> DowncastPacket for P where P: Packet + dc::Downcast + Send + Sync + std::fmt::Debug {}
 
 dc::impl_downcast!(DowncastPacket);
+
+#[derive(te::Error, Debug)]
+pub enum PacketBufferError {
+    #[error("Packet was too short and did not contain an ID")]
+    PacketTooShort,
+    #[error("Error when serializing or deserializing buffer: {0}")]
+    SerializationError(#[from] bincode::Error),
+    #[error("Attempted to deserialize buffer with ID {0} into a packet with ID {1}")]
+    MismatchedPacketId(u16, u16),
+    #[error("IO error when producing a buffer from a stream: {0}")]
+    IoError(#[from] io::Error),
+}
+
+#[derive(Debug, Hash, PartialEq)]
+pub struct PacketBuffer {
+    inner: Vec<u8>,
+}
+
+impl PacketBuffer {
+    pub fn from_reader<R: Read>(reader: &mut R) -> Result<Self, PacketBufferError> {
+        let mut buf = Vec::<u8>::new();
+
+        // We only allow valid packet data, so there must be enough bytes to produce an ID.
+        if reader.read_to_end(&mut buf)? < size_of::<u16>() {
+            return Err(PacketBufferError::PacketTooShort);
+        }
+
+        Ok(Self { inner: buf })
+    }
+
+    pub fn id(&self) -> u16 {
+        u16::from_be_bytes(self.inner[..size_of::<u16>()].try_into().unwrap())
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn from_packet<P: Packet>(packet: &P) -> Result<Self, PacketBufferError> {
+        let mut buf = P::ID.to_be_bytes().to_vec();
+        buf.extend(bincode::serialize(packet)?);
+
+        Ok(Self { inner: buf })
+    }
+
+    pub fn to_packet<P: Packet>(&self) -> Result<P, PacketBufferError> {
+        if self.id() != P::ID {
+            return Err(PacketBufferError::MismatchedPacketId(self.id(), P::ID));
+        }
+        let packet = bincode::deserialize::<P>(&self.inner[size_of::<u16>()..])?;
+        Ok(packet)
+    }
+}
+
+impl AsRef<[u8]> for PacketBuffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.inner
+    }
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct GenerateChunk {

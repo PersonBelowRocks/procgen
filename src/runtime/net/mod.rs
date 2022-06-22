@@ -9,10 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use flate2::{
-    write::{ZlibDecoder, ZlibEncoder},
-    Compression,
-};
+use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     net::{
@@ -25,7 +22,7 @@ use tokio::{
     },
 };
 
-use self::packets::{DowncastPacket, Packet};
+use self::packets::{DowncastPacket, Packet, PacketBuffer};
 
 use super::{server::ServerParams, util::ConnectionId};
 
@@ -107,7 +104,7 @@ impl Compressor {
 
     pub async fn write<S: AsyncWriteExt + Unpin>(
         &self,
-        packet: &[u8],
+        packet: &PacketBuffer,
         stream: &mut S,
     ) -> anyhow::Result<()> {
         let decompressed_len = packet.len() as u32;
@@ -115,7 +112,7 @@ impl Compressor {
         let compressed_buf = {
             let mut buf = Vec::<u8>::new();
             let mut encoder = ZlibEncoder::new(&mut buf, self.level);
-            encoder.write_all(packet)?;
+            encoder.write_all(packet.as_ref())?;
             encoder.finish()?;
 
             buf
@@ -132,7 +129,10 @@ impl Compressor {
         Ok(())
     }
 
-    pub async fn read<S: AsyncReadExt + Unpin>(&self, stream: &mut S) -> anyhow::Result<Vec<u8>> {
+    pub async fn read<S: AsyncReadExt + Unpin>(
+        &self,
+        stream: &mut S,
+    ) -> anyhow::Result<PacketBuffer> {
         let header = Header::read(stream).await?;
 
         let compressed_buf = {
@@ -143,26 +143,19 @@ impl Compressor {
             buf
         };
 
-        let decompressed_buf = {
-            let mut buf = Vec::with_capacity(header.decompressed_len as usize);
+        let mut decompressor = ZlibDecoder::new(&compressed_buf[..]);
 
-            let mut decoder = ZlibDecoder::new(&mut buf);
-            decoder.write_all(&compressed_buf)?;
-            decoder.finish()?;
-
-            buf
-        };
-
-        Ok(decompressed_buf)
+        let buf = PacketBuffer::from_reader(&mut decompressor)?;
+        Ok(buf)
     }
 }
 
 pub struct ConnectionIncoming<'a> {
-    guard: MutexGuard<'a, Receiver<Vec<u8>>>,
+    guard: MutexGuard<'a, Receiver<PacketBuffer>>,
 }
 
 impl<'a> Iterator for ConnectionIncoming<'a> {
-    type Item = Vec<u8>;
+    type Item = PacketBuffer;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.guard.try_recv().ok()
@@ -172,10 +165,10 @@ impl<'a> Iterator for ConnectionIncoming<'a> {
 #[derive(Clone)]
 pub struct Connection {
     read: Arc<Mutex<BufReader<OwnedReadHalf>>>,
-    read_rx: Option<Arc<Mutex<Receiver<Vec<u8>>>>>,
+    read_rx: Option<Arc<Mutex<Receiver<PacketBuffer>>>>,
 
     write: Arc<Mutex<BufWriter<OwnedWriteHalf>>>,
-    write_tx: Option<Arc<Mutex<Sender<Vec<u8>>>>>,
+    write_tx: Option<Arc<Mutex<Sender<PacketBuffer>>>>,
 
     compressor: Compressor,
     id: ConnectionId,
@@ -208,7 +201,7 @@ impl Connection {
     }
 
     pub async fn send_packet<P: Packet>(&self, packet: &P) -> anyhow::Result<()> {
-        let raw = packet.bincode();
+        let raw = packet.to_bincode()?;
 
         self.write_tx
             .as_ref()
@@ -233,8 +226,8 @@ impl Connection {
             "cannot run connection twice!"
         );
 
-        let (read_tx, read_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
-        let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(128);
+        let (read_tx, read_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
+        let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
 
         self.read_rx = Some(Arc::new(Mutex::new(read_rx)));
         self.write_tx = Some(Arc::new(Mutex::new(write_tx)));
