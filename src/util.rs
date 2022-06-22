@@ -4,6 +4,7 @@ pub type IVec2 = na::Vector2<i32>;
 pub type IVec3 = na::Vector3<i32>;
 
 /// Casts a 3D vector of integer types (i32, u32, u16, usize, etc.) to a 3D vector of a different integer type.
+#[allow(dead_code)]
 #[inline]
 pub fn cast_ivec3<T: NumCast, N: ToPrimitive + Copy>(v: na::Vector3<N>) -> Option<na::Vector3<T>> {
     let x = <T as NumCast>::from(v[0])?;
