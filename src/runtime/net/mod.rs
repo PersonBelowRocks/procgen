@@ -6,7 +6,11 @@ use std::{
     io::{Read, Write},
     net::{SocketAddr, SocketAddrV4},
     ops::DerefMut,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
 };
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
@@ -22,7 +26,7 @@ use tokio::{
     },
 };
 
-use self::packets::{DowncastPacket, Packet, PacketBuffer};
+use self::packets::{DowncastPacket, Packet, PacketBuffer, ProtocolError, ProtocolErrorKind};
 
 use super::{server::ServerParams, util::ConnectionId};
 
@@ -170,6 +174,8 @@ pub struct Connection {
     write: Arc<Mutex<BufWriter<OwnedWriteHalf>>>,
     write_tx: Option<Arc<Mutex<Sender<PacketBuffer>>>>,
 
+    running: Arc<AtomicBool>,
+
     compressor: Compressor,
     id: ConnectionId,
 }
@@ -191,6 +197,7 @@ impl Connection {
             read_rx: None,
             write: Mutex::new(BufWriter::new(write)).into(),
             write_tx: None,
+            running: Arc::new(false.into()),
             compressor: Compressor::new(compression),
             id,
         }
@@ -222,9 +229,11 @@ impl Connection {
 
     pub fn run(&mut self) {
         assert!(
-            (self.read_rx.is_none() && self.write_tx.is_none()),
+            !self.running.load(Ordering::SeqCst),
             "cannot run connection twice!"
         );
+
+        self.running.store(true, Ordering::SeqCst);
 
         let (read_tx, read_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
         let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
@@ -235,29 +244,67 @@ impl Connection {
         // Reader
         let reader = self.read.clone();
         let compressor = self.compressor;
+        let running = self.running.clone();
+        let id = self.id();
         tokio::spawn(async move {
-            loop {
-                let raw = compressor
-                    .read(reader.lock().await.deref_mut())
-                    .await
-                    .unwrap();
-                read_tx.send(raw).await.unwrap();
+            while running.load(Ordering::SeqCst) {
+                for c in 0..100 {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    println!("{id}: cycling {c}");
+                    let mut guard = reader.lock().await;
+                    println!("{id}: acquired lock for cycle {c}");
+                    match compressor.read(guard.deref_mut()).await {
+                        Ok(raw) => read_tx.send(raw).await.unwrap(),
+                        Err(error) => {
+                            println!("error reading packet from {id}: {error}")
+                        }
+                    }
+                }
             }
         });
 
         // Writer
         let writer = self.write.clone();
         let compressor = self.compressor;
+        let running = self.running.clone();
         tokio::spawn(async move {
-            loop {
-                if let Some(raw) = write_rx.recv().await {
-                    compressor
-                        .write(&raw, writer.lock().await.deref_mut())
-                        .await
-                        .unwrap();
+            while running.load(Ordering::SeqCst) {
+                for _ in 0..100 {
+                    if let Ok(raw) = write_rx.try_recv() {
+                        compressor
+                            .write(&raw, writer.lock().await.deref_mut())
+                            .await
+                            .unwrap();
+                    }
                 }
             }
         });
+    }
+
+    pub async fn terminate(&self) -> anyhow::Result<()> {
+        let packet = ProtocolError::fatal(ProtocolErrorKind::Terminated {
+            details: "Server stopped".to_string(),
+        });
+
+        self.compressor
+            .write(
+                &packet.to_bincode().unwrap(),
+                self.write.lock().await.deref_mut(),
+            )
+            .await?;
+
+        self.running.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for Connection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connection")
+            .field("address", &self.id)
+            .field("compression", &self.compressor.level)
+            .field("running", &self.running.load(Ordering::SeqCst))
+            .finish()
     }
 }
 
@@ -281,6 +328,7 @@ pub(crate) struct Networker {
     params: Params,
     listener: Option<Arc<Mutex<TcpListener>>>,
     connections: Shared<ConnectionMap>,
+    running: Arc<AtomicBool>,
 }
 
 impl Networker {
@@ -289,36 +337,53 @@ impl Networker {
             params,
             listener: None,
             connections: Arc::new(RwLock::new(HashMap::new())),
+            running: Arc::new(false.into()),
         }
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        assert!(self.listener.is_none(), "cannot start networker twice!");
+        assert!(
+            !self.running.load(Ordering::SeqCst),
+            "cannot start networker twice!"
+        );
+
+        self.running.store(true, Ordering::SeqCst);
 
         let listener = Arc::new(Mutex::new(TcpListener::bind(self.params.addr).await?));
         self.listener = Some(listener.clone());
 
         let connections = self.connections.clone();
         let compression = self.params.compression;
+        let running = self.running.clone();
 
         tokio::spawn(async move {
-            loop {
-                let (incoming, _) = listener.lock().await.accept().await.unwrap();
+            while running.load(Ordering::SeqCst) {
+                for _ in 0..100 {
+                    let (incoming, _) = listener.lock().await.accept().await.unwrap();
 
-                let mut conn = Connection::new(incoming, compression);
+                    let mut conn = Connection::new(incoming, compression);
 
-                log::info!("accepted connection from {}", conn.id());
+                    println!("accepted connection from {}", conn.id());
 
-                conn.run();
-                connections.write().await.insert(conn.id(), conn);
+                    conn.run();
+                    connections.write().await.insert(conn.id(), conn);
+                }
             }
         });
 
         Ok(())
     }
 
-    pub async fn stop(&mut self) -> anyhow::Result<()> {
-        todo!()
+    pub async fn stop(self) -> anyhow::Result<()> {
+        self.running.store(false, Ordering::SeqCst);
+
+        for conn in self.connections.read().await.values() {
+            if let Err(error) = conn.terminate().await {
+                log::warn!("Error when terminating connection {conn:?}: {error}");
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn incoming(&self) -> Incoming {

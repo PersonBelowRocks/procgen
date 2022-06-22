@@ -211,8 +211,9 @@ impl Server {
         }
     }
 
-    pub fn stop(&mut self) {
-        self.running.store(false, Ordering::SeqCst)
+    pub async fn stop(self) -> anyhow::Result<()> {
+        self.running.store(false, Ordering::SeqCst);
+        self.net.stop().await
     }
 
     pub async fn add_generator<G: ChunkGenerator>(&mut self) {
