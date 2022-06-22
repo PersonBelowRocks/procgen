@@ -1,4 +1,4 @@
-### Minecraft procedural terrain generation server.
+# Minecraft procedural terrain generation server.
 This is an attempt at making a terrain generation server for Minecraft in Rust.
 The system (hopefully) works like this:
 - A terrain server is started and equipped with some terrain generators.
@@ -18,7 +18,7 @@ The client is responsible for keeping track of which request IDs refer to which 
 The system should (fingers crossed) allow clients to use the server to generate all sorts of different terrain, and use multiple generators.
 One scenario where this would be useful is having different generators for different dimensions (one nether, one end, one overworld).
 
-# Progress and plans
+### Progress and plans
 Currently the server is "usable", but there is no client or plugin for it. 
 The server is also riddled with various bugs, for example:
 - A client can access a generator instance of another client if they know the instance's ID.
