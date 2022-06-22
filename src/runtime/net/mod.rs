@@ -248,15 +248,12 @@ impl Connection {
         let id = self.id();
         tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
-                for c in 0..100 {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                    println!("{id}: cycling {c}");
+                for _ in 0..100 {
                     let mut guard = reader.lock().await;
-                    println!("{id}: acquired lock for cycle {c}");
                     match compressor.read(guard.deref_mut()).await {
                         Ok(raw) => read_tx.send(raw).await.unwrap(),
                         Err(error) => {
-                            println!("error reading packet from {id}: {error}")
+                            log::warn!("error reading packet from {id}: {error}")
                         }
                     }
                 }
@@ -363,7 +360,7 @@ impl Networker {
 
                     let mut conn = Connection::new(incoming, compression);
 
-                    println!("accepted connection from {}", conn.id());
+                    log::info!("accepted connection from {}", conn.id());
 
                     conn.run();
                     connections.write().await.insert(conn.id(), conn);
