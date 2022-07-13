@@ -1,11 +1,7 @@
 use vol::prelude::*;
 
-use crate::{
-    block::BlockId,
-    util::{IVec2, IVec3},
-};
-
 use super::section::ChunkSection;
+use crate::{BlockId, IVec2, IVec3};
 
 /// X and Z dimensions of chunks (taken from Minecraft)
 pub const CHUNK_SIZE: i32 = 16;
@@ -219,47 +215,5 @@ impl std::fmt::Debug for Chunk {
                     .collect::<Vec<_>>(),
             )
             .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chunk_indexing() {
-        const DEFAULT_ID: BlockId = BlockId::new(10);
-
-        let mut chunk = Chunk::new(DEFAULT_ID, na::vector![2, 2], -64, 320);
-
-        assert_eq!(chunk.get(Spaces::Ws(na::vector![3i32, 3, 8])), None);
-        assert_eq!(
-            chunk.get(Spaces::Ws(
-                na::vector![3i32, 3, 8] + (na::vector![2, 0, 2] * CHUNK_SIZE)
-            )),
-            Some(&DEFAULT_ID)
-        );
-
-        assert_eq!(chunk.get(na::vector![u64::MAX, 0, 0]), None);
-        assert_eq!(chunk.get(na::vector![-100i32, 50, -10]), None);
-
-        assert_eq!(
-            chunk.swap(
-                Spaces::Ws(na::vector![3i32, 3, 8] + (na::vector![2, 0, 2] * CHUNK_SIZE)),
-                BlockId::new(42)
-            ),
-            Some(DEFAULT_ID)
-        );
-        assert_eq!(
-            chunk.get(Spaces::Ws(
-                na::vector![3i32, 3, 8] + (na::vector![2i32, 0, 2] * CHUNK_SIZE)
-            )),
-            Some(&BlockId::new(42))
-        );
-
-        assert_eq!(
-            chunk.get(Spaces::Cs(na::vector![3i32, 3, 8])),
-            Some(&BlockId::new(42))
-        );
     }
 }

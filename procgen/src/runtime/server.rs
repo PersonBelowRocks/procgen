@@ -13,20 +13,18 @@ use threadpool::ThreadPool;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 
-use crate::{
-    chunk::Chunk,
-    generation::{
-        ChunkGenerator, DynChunkGenerator, DynGeneratorFactory, FactoryParameters, GenerationArgs,
-    },
-};
+use crate::generation::{ChunkGenerator, DynChunkGenerator, DynGeneratorFactory};
+use common::generation::{FactoryParameters, GenerationArgs};
 
 use super::{
     net::{
         packets::{self, ProtocolError, ProtocolErrorKind, ReplyChunk},
         Networker,
     },
-    util::{GenerationIdent, GeneratorId, RequestIdent},
+    util::{GenerationIdent, RequestIdent},
 };
+
+use common::{Chunk, GeneratorId};
 
 #[derive(Debug)]
 enum GenerationResult {

@@ -4,12 +4,9 @@ use std::{
     mem::size_of,
 };
 
-use crate::{
-    block::BlockId,
-    chunk::Chunk,
-    generation::{FactoryParameters, GenerationArgs},
-    runtime::util::{GeneratorId, RequestId},
-};
+use common::generation::{FactoryParameters, GenerationArgs};
+
+use common::{BlockId, Chunk, GeneratorId, RequestId};
 
 use super::DynPacket;
 

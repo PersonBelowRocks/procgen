@@ -1,34 +1,5 @@
-[package]
-name = "procgen"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.58"
-
-[dependencies]
-thiserror = "1.0"
-anyhow = "1.0"
-num-traits = "0.2.15"
-bincode = "1.3.3"
-flate2 = "1.0"
-threadpool = "1.8"
-env_logger = "0.9.0"
-log = "0.4.17"
-downcast-rs = "1.2"
-rand = "0.8.5"
-
-[dependencies.tokio]
-version = "1.17"
-features = ["full"]
-
-[dependencies.serde]
-version = "1.0"
-features = ["derive"]
-
-[dependencies.nalgebra]
-version = "0.31"
-features = ["serde-serialize"]
-
-[dependencies.volume]
-git = "https://github.com/PersonBelowRocks/volume.git"
-rev = "4537747856839b760aa13e1c86b95b0508988f33"
-features = ["nalgebra", "glam"]
+[workspace]
+members = [
+    "procgen",
+    "procgen-common"
+]

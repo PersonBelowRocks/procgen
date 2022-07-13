@@ -8,13 +8,16 @@ use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
 use volume::Volume;
 
 use crate::{
-    block::BlockId,
-    chunk::{Chunk, Spaces},
-    generation::{ChunkGenerator, FactoryParameters, GenerationArgs, GeneratorFactory},
+    generation::{ChunkGenerator, GeneratorFactory},
     runtime::{
         net::packets::ProtocolErrorKind,
         server::{Server, ServerParams},
     },
+};
+
+use common::{
+    generation::{FactoryParameters, GenerationArgs},
+    BlockId, Chunk, Spaces,
 };
 
 use super::net::{
@@ -264,7 +267,7 @@ async fn end_to_end_server_test() {
     for x in 0..16 {
         for z in 0..16 {
             assert_eq!(
-                packet.chunk.get(Spaces::Cs([x, -64, z])),
+                packet.chunk.get(Spaces::Cs([x, -64i32, z])),
                 Some(&BlockId::new(80))
             );
         }

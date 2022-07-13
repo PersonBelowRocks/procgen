@@ -1,6 +1,6 @@
 use vol::builtins::*;
 
-use crate::block::BlockId;
+use crate::BlockId;
 
 use super::basic::CHUNK_SIZE;
 
@@ -115,40 +115,4 @@ impl<Idx: VolumeIdx> VolumeAccess<Idx> for ChunkSection {
 
 impl Volume for ChunkSection {
     type Item = BlockId;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chunk_section_indexing() {
-        const DEFAULT_ID: BlockId = BlockId::new(5);
-
-        let mut section = ChunkSection::new_uninitialized(DEFAULT_ID);
-
-        assert_eq!(section.get([7i32, 7, 7]), Some(&DEFAULT_ID));
-        assert_eq!(section.get([0i32, 0, 0]), Some(&DEFAULT_ID));
-        assert_eq!(section.get([16i32, 16, 16]), None);
-        assert_eq!(section.get([-1i32, -1, -1]), None);
-
-        assert_eq!(
-            section.swap([7i32, 7, 7], BlockId::new(42)),
-            Some(DEFAULT_ID)
-        );
-        assert_eq!(section.get([7i32, 7, 7]), Some(&BlockId::new(42)));
-    }
-
-    #[test]
-    fn chunk_section_bounds() {
-        const DEFAULT_ID: BlockId = BlockId::new(5);
-
-        let section = ChunkSection::new_uninitialized(DEFAULT_ID);
-
-        assert!(section.contains([0i32, 0, 0]));
-        assert!(section.contains([15i32, 15, 15]));
-
-        assert!(!section.contains([-1i32, -1, -1]));
-        assert!(!section.contains([16i32, 16, 16]));
-    }
 }

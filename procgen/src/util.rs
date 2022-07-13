@@ -1,8 +1,5 @@
 use num_traits::{NumCast, ToPrimitive};
 
-pub type IVec2 = na::Vector2<i32>;
-pub type IVec3 = na::Vector3<i32>;
-
 /// Casts a 3D vector of integer types (i32, u32, u16, usize, etc.) to a 3D vector of a different integer type.
 #[allow(dead_code)]
 #[inline]

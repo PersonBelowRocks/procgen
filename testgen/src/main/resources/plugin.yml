@@ -1,0 +1,8 @@
+name: TestGen
+version: '${version}'
+main: io.github.personbelowrocks.minecraft.testgenerator.Main
+api-version: 1.18
+prefix: TestGen
+authors: [ PersonBelowRocks ]
+description: World generation test
+load: STARTUP
