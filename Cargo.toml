@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "procgen",
-    "procgen-common"
+    "procgen-common",
+    "plugin-natives"
 ]

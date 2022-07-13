@@ -49,6 +49,16 @@ impl ChunkSection {
     pub fn default_id(&self) -> BlockId {
         self.default
     }
+
+    #[inline]
+    pub fn inner_ref(&self) -> Option<&ChunkSectionStorage> {
+        self.volume.as_ref()
+    }
+
+    #[inline]
+    pub fn inner_mut(&mut self) -> Option<&mut ChunkSectionStorage> {
+        self.volume.as_mut()
+    }
 }
 
 impl std::cmp::PartialEq for ChunkSection {

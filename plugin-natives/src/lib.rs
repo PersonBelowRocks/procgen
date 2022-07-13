@@ -1,89 +1,35 @@
 extern crate nalgebra as na;
+extern crate procgen_common as common;
 
+use common::packets::PacketBuffer;
+use common::Chunk;
+use common::ChunkSection;
+use common::CHUNK_SIZE;
 use flate2::read::ZlibDecoder;
 use flate2::read::ZlibEncoder;
 use flate2::Compression;
 use jni::descriptors::Desc;
 use jni::objects::{JObject, JValue};
+use jni::sys::jobject;
 use jni::sys::{jboolean, jbyte, jchar, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
 use std::io::Read;
 
 pub mod bindings;
-mod chunk;
 mod packets;
 
-macro_rules! impl_display_debug {
-    ($t:ty) => {
-        impl std::fmt::Display for $t {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.0)
-            }
-        }
-
-        impl std::fmt::Debug for $t {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.0)
-            }
-        }
-    };
-}
-
-macro_rules! impl_from_u32_id {
-    ($t:ty) => {
-        impl From<u32> for $t {
-            fn from(n: u32) -> Self {
-                Self(n)
-            }
-        }
-
-        impl From<$t> for u32 {
-            fn from(id: $t) -> Self {
-                id.0
-            }
-        }
-    };
-}
-
-fn decompress_packet(bytes: &[u8], size_hint: usize) -> Vec<u8> {
+fn decompress_packet(bytes: &[u8], _size_hint: usize) -> PacketBuffer {
     let mut reader = ZlibDecoder::new(bytes);
-    let mut buf = Vec::with_capacity(size_hint);
-
-    reader.read_to_end(&mut buf).unwrap();
-    buf
+    PacketBuffer::from_reader(&mut reader).unwrap()
 }
 
-fn compress_packet(bytes: &[u8]) -> Vec<u8> {
-    let mut reader = ZlibEncoder::new(bytes, Compression::best());
+fn compress_packet(bytes: &PacketBuffer) -> Vec<u8> {
+    let mut reader = ZlibEncoder::new(bytes.as_ref(), Compression::best());
     let mut buf = Vec::new();
 
     reader.read_to_end(&mut buf).unwrap();
     buf
 }
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct RequestId(u32);
-
-impl_display_debug!(RequestId);
-impl_from_u32_id!(RequestId);
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct GeneratorId(u32);
-
-impl_display_debug!(GeneratorId);
-impl_from_u32_id!(GeneratorId);
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub struct BlockId(u32);
-
-impl BlockId {
-    pub const fn new(id: u32) -> Self {
-        Self(id)
-    }
-}
-
-impl_display_debug!(BlockId);
-impl_from_u32_id!(BlockId);
 
 struct JvmConstructableDesc<'a> {
     class: &'static str,
@@ -167,6 +113,7 @@ struct CtorArgs<'a> {
     buf: Vec<QualifiedJValue<'a>>,
 }
 
+#[allow(dead_code)]
 impl<'b, 'a> CtorArgs<'a> {
     fn new() -> Self {
         Self { buf: Vec::new() }
@@ -202,10 +149,10 @@ impl<'b, 'a> CtorArgs<'a> {
 trait JvmConstructable: Sized {
     const CLASS: &'static str;
 
-    fn ctor_args<'b, 'a>(&self, env: &JNIEnv<'a>) -> CtorArgs<'a>;
+    fn ctor_args<'a>(&self, env: &JNIEnv<'a>) -> CtorArgs<'a>;
     fn from_jvm_obj(env: &JNIEnv<'_>, obj: JObject<'_>) -> Option<Self>;
 
-    fn desc<'b, 'a>(&self, env: &JNIEnv<'a>) -> JvmConstructableDesc<'a> {
+    fn desc<'a>(&self, env: &JNIEnv<'a>) -> JvmConstructableDesc<'a> {
         let ctor_args = self.ctor_args(env);
 
         JvmConstructableDesc {
@@ -213,5 +160,108 @@ trait JvmConstructable: Sized {
             ctor_sig: ctor_args.signature(),
             ctor_args,
         }
+    }
+}
+
+impl JvmConstructable for ChunkSection {
+    const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/ChunkSection";
+
+    fn ctor_args<'a>(&self, env: &JNIEnv<'a>) -> CtorArgs<'a> {
+        if !self.is_initialized() {
+            let mut args = CtorArgs::new();
+            args.add(QualifiedJValue::Object(NamedJObject::new(
+                "[[[I".into(),
+                (std::ptr::null::<u8>() as jobject).into(),
+            )));
+
+            return args;
+        }
+
+        let cls = env.find_class("[I").unwrap();
+
+        let pole = env.new_int_array(CHUNK_SIZE as _).unwrap();
+        let sheet = env.new_object_array(CHUNK_SIZE as _, cls, pole).unwrap();
+
+        let cubic = env
+            .new_object_array(CHUNK_SIZE as _, env.get_object_class(sheet).unwrap(), sheet)
+            .unwrap();
+        for x in 0..CHUNK_SIZE {
+            let sheet = env.new_object_array(CHUNK_SIZE as _, cls, pole).unwrap();
+
+            for y in 0..CHUNK_SIZE {
+                let pole = env.new_int_array(CHUNK_SIZE as _).unwrap();
+                let buf = (0..CHUNK_SIZE)
+                    .map(|z| self.inner_ref().unwrap()[[x, y, z]])
+                    .map(|b| i32::from_be_bytes(u32::from(b).to_be_bytes()))
+                    .collect::<Vec<i32>>();
+
+                env.set_int_array_region(pole, 0, &buf).unwrap();
+                env.set_object_array_element(sheet, y as _, pole).unwrap();
+            }
+
+            env.set_object_array_element(cubic, x as _, sheet).unwrap();
+        }
+
+        let mut args = CtorArgs::new();
+        args.add(QualifiedJValue::Object(NamedJObject::new(
+            "[[[I".into(),
+            cubic.into(),
+        )));
+
+        args
+    }
+
+    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
+        todo!()
+    }
+}
+
+impl JvmConstructable for Chunk {
+    const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/Chunk";
+
+    fn ctor_args<'a>(&self, env: &JNIEnv<'a>) -> CtorArgs<'a> {
+        let section_cls = env.find_class(ChunkSection::CLASS).unwrap();
+
+        let sections = self
+            .sections()
+            .iter()
+            .map(|s| {
+                let args = s.ctor_args(env);
+                match env.new_object(section_cls, args.signature(), &args.jvalue_buf()) {
+                    Ok(obj) => obj,
+                    Err(error) => {
+                        let jerr = error.lookup(env).unwrap();
+                        env.exception_describe().unwrap();
+                        panic!("{:?}", jerr)
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let jvm_sections = env
+            .new_object_array(sections.len() as _, section_cls, sections[0])
+            .unwrap();
+        sections.into_iter().enumerate().for_each(|(i, section)| {
+            env.set_object_array_element(jvm_sections, i as _, section)
+                .unwrap();
+        });
+
+        let mut args = CtorArgs::new();
+        args.add(QualifiedJValue::Object(NamedJObject::new(
+            format!("[L{};", ChunkSection::CLASS),
+            jvm_sections.into(),
+        )))
+        .add(QualifiedJValue::Long(self.bounding_box().min()[0]))
+        .add(QualifiedJValue::Long(self.bounding_box().min()[1]))
+        .add(QualifiedJValue::Long(self.bounding_box().min()[2]))
+        .add(QualifiedJValue::Long(self.bounding_box().max()[0]))
+        .add(QualifiedJValue::Long(self.bounding_box().max()[1]))
+        .add(QualifiedJValue::Long(self.bounding_box().max()[2]));
+
+        args
+    }
+
+    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
+        todo!()
     }
 }

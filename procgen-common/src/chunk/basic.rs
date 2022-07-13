@@ -66,6 +66,11 @@ impl Chunk {
     pub fn default_id(&self) -> BlockId {
         self.sections[0].default_id()
     }
+
+    #[inline]
+    pub fn sections(&self) -> &[ChunkSection] {
+        &self.sections
+    }
 }
 
 impl<Idx: VolumeIdx> VolumeAccess<Idx> for Chunk {

@@ -1,42 +1,8 @@
-use crate::chunk::Chunk;
-use crate::{
-    BlockId, CtorArgs, GeneratorId, JvmConstructable, JvmConstructableDesc, NamedJObject,
-    QualifiedJValue, RequestId,
-};
+use crate::{CtorArgs, JvmConstructable, NamedJObject, QualifiedJValue};
+use common::packets::*;
 use jni::objects::JValue;
 use jni::JNIEnv;
-
-pub trait Packet: serde::Serialize + serde::de::DeserializeOwned {
-    const ID: u16;
-
-    fn to_bincode(&self) -> Vec<u8> {
-        let mut buf = Self::ID.to_be_bytes().to_vec();
-        buf.extend(bincode::serialize(self).unwrap());
-        buf
-    }
-
-    fn from_bincode(bytes: &[u8]) -> Option<Self> {
-        let id = u16::from_be_bytes(bytes[..2].try_into().ok()?);
-        let body = &bytes[2..];
-
-        if id != Self::ID {
-            return None;
-        }
-
-        bincode::deserialize::<Self>(body).ok()
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct GenerateChunk {
-    pub request_id: RequestId,
-    pub generator_id: GeneratorId,
-    pub pos: na::Vector2<i32>,
-}
-
-impl Packet for GenerateChunk {
-    const ID: u16 = 0;
-}
+use procgen_common::Chunk;
 
 impl JvmConstructable for GenerateChunk {
     const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/GenerateChunk";
@@ -74,12 +40,6 @@ impl JvmConstructable for GenerateChunk {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct ReplyChunk {
-    pub request_id: RequestId,
-    pub chunk: Chunk,
-}
-
 impl JvmConstructable for ReplyChunk {
     const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/ReplyChunk";
 
@@ -104,23 +64,10 @@ impl JvmConstructable for ReplyChunk {
         args
     }
 
-    fn from_jvm_obj(env: &JNIEnv<'_>, obj: jni::objects::JObject<'_>) -> Option<Self> {
+    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
         // we're probably never gonna need an implementation here because we don't need to transmit this packet to the server.
         todo!()
     }
-}
-
-impl Packet for ReplyChunk {
-    const ID: u16 = 1;
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct AddGenerator {
-    pub request_id: RequestId,
-    pub name: String,
-    pub min_height: i32,
-    pub max_height: i32,
-    pub default_id: BlockId,
 }
 
 impl JvmConstructable for AddGenerator {
@@ -171,25 +118,6 @@ impl JvmConstructable for AddGenerator {
     }
 }
 
-impl Packet for AddGenerator {
-    const ID: u16 = 2;
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct ConfirmGeneratorAddition {
-    pub request_id: RequestId,
-    pub generator_id: GeneratorId,
-}
-
-impl ConfirmGeneratorAddition {
-    pub fn new(request_id: RequestId, generator_id: GeneratorId) -> Self {
-        Self {
-            request_id,
-            generator_id,
-        }
-    }
-}
-
 impl JvmConstructable for ConfirmGeneratorAddition {
     const CLASS: &'static str =
         "io/github/personbelowrocks/minecraft/testgenerator/ConfirmGeneratorAddition";
@@ -203,48 +131,8 @@ impl JvmConstructable for ConfirmGeneratorAddition {
         args
     }
 
-    fn from_jvm_obj(env: &JNIEnv<'_>, obj: jni::objects::JObject<'_>) -> Option<Self> {
+    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
         todo!()
-    }
-}
-
-impl Packet for ConfirmGeneratorAddition {
-    const ID: u16 = 3;
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
-pub enum ProtocolErrorKind {
-    Other {
-        details: String,
-    },
-    GeneratorNotFound {
-        generator_id: GeneratorId,
-        request_id: RequestId,
-    },
-    ChunkGenerationFailure {
-        generator_id: GeneratorId,
-        request_id: RequestId,
-        details: String,
-    },
-    Terminated {
-        details: String,
-    },
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct ProtocolError {
-    pub kind: ProtocolErrorKind,
-    pub fatal: bool,
-}
-
-impl ProtocolError {
-    pub fn gentle(kind: ProtocolErrorKind) -> Self {
-        Self { kind, fatal: false }
-    }
-
-    pub fn fatal(kind: ProtocolErrorKind) -> Self {
-        Self { kind, fatal: true }
     }
 }
 
@@ -263,11 +151,7 @@ impl JvmConstructable for ProtocolError {
         args
     }
 
-    fn from_jvm_obj(env: &JNIEnv<'_>, obj: jni::objects::JObject<'_>) -> Option<Self> {
+    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
         todo!()
     }
-}
-
-impl Packet for ProtocolError {
-    const ID: u16 = 4;
 }

@@ -48,7 +48,7 @@ type IVec2 = na::Vector2<i32>;
 type IVec3 = na::Vector3<i32>;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RequestId(u32);
+pub struct RequestId(pub u32);
 
 impl_display_debug!(RequestId);
 impl_from_u32_id!(RequestId);
@@ -59,13 +59,13 @@ pub struct ConnectionId(pub SocketAddrV4);
 impl_display_debug!(ConnectionId);
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct GeneratorId(u32);
+pub struct GeneratorId(pub u32);
 
 impl_display_debug!(GeneratorId);
 impl_from_u32_id!(GeneratorId);
 
 #[derive(Default, Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
-pub struct BlockId(u32);
+pub struct BlockId(pub u32);
 
 impl BlockId {
     pub const fn new(id: u32) -> Self {

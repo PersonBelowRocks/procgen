@@ -1,22 +1,8 @@
-use jni::descriptors::Desc;
-use std::mem::size_of;
-use std::time::Duration;
-// This is the interface to the JVM that we'll call the majority of our
-// methods on.
+use crate::{compress_packet, decompress_packet, jlong, jshort, JvmConstructable};
+use common::packets::*;
+use jni::objects::JClass;
+use jni::sys::{jbyteArray, jobject};
 use jni::JNIEnv;
-
-// These objects are what you should use as arguments to your native
-// function. They carry extra lifetime information to prevent them escaping
-// this context and getting used after being GC'd.
-use jni::objects::{JClass, JString, JValue, ReleaseMode, TypeArray};
-use jni::signature::Primitive::Double;
-
-// This is just a pointer. We'll be returning it from our function. We
-// can't return one of the objects with lifetime information because the
-// lifetime checker won't let us.
-use crate::packets::{AddGenerator, ConfirmGeneratorAddition, GenerateChunk, Packet, ReplyChunk};
-use crate::{compress_packet, decompress_packet, jlong, jshort, packets, JvmConstructable};
-use jni::sys::{jbyte, jbyteArray, jdouble, jobject, jstring};
 
 #[no_mangle]
 pub extern "system" fn Java_io_github_personbelowrocks_minecraft_testgenerator_NativeBindings_decodePacket(
@@ -27,7 +13,7 @@ pub extern "system" fn Java_io_github_personbelowrocks_minecraft_testgenerator_N
 ) -> jobject {
     let compressed_buffer = env.convert_byte_array(bytes).unwrap();
     let decompressed_buffer = decompress_packet(&compressed_buffer, size_hint as _);
-    let id = u16::from_be_bytes(decompressed_buffer[..size_of::<u16>()].try_into().unwrap());
+    let id = decompressed_buffer.id();
 
     let desc = match id {
         GenerateChunk::ID => GenerateChunk::from_bincode(&decompressed_buffer)
@@ -69,7 +55,8 @@ pub extern "system" fn Java_io_github_personbelowrocks_minecraft_testgenerator_N
             packet.to_bincode()
         }
         _ => panic!("uh oh! {} is not a good ID :(", id),
-    };
+    }
+    .unwrap();
 
     let decompressed_len = decompressed_buffer.len() as u32;
     let compressed_buffer = compress_packet(&decompressed_buffer);
