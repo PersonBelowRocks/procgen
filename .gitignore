@@ -1,4 +1,4 @@
 /target
 ./Cargo.lock
-./testgen/server
-./testgen/decompile
+/testgen/server
+/testgen/decompile
