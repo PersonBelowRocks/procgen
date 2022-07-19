@@ -361,3 +361,8 @@ async fn server_stopping() {
     t1.join().unwrap();
     t2.join().unwrap();
 }
+
+#[test]
+fn dispatcher() {
+    todo!()
+}
