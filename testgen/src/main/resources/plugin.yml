@@ -5,4 +5,10 @@ api-version: 1.18
 prefix: TestGen
 authors: [ PersonBelowRocks ]
 description: World generation test
+depend: [ WorldEdit ]
 load: STARTUP
+
+commands:
+  /pbrgen:
+    usage: GET FUCKED
+    description: does something

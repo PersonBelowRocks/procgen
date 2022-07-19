@@ -25,9 +25,8 @@ use tokio::{
     },
 };
 
-use self::packets::{DowncastPacket, Packet, PacketBuffer, ProtocolError, ProtocolErrorKind};
-
 use super::server::ServerParams;
+use common::packets::*;
 use common::ConnectionId;
 
 type DynPacket = Box<dyn DowncastPacket>;

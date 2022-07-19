@@ -80,7 +80,7 @@ impl ChunkGenerator for MockGenerator {
 
 #[tokio::main]
 async fn main() {
-    use runtime::net::packets::Packet;
+    use common::packets::Packet;
 
     env_logger::init();
 
@@ -88,7 +88,7 @@ async fn main() {
     chunk.set(Spaces::Cs([8i32, -60, 4]), 42.into());
     chunk.set(Spaces::Cs([1i32, 310, 2]), 42.into());
 
-    let packet = runtime::net::packets::ReplyChunk {
+    let packet = common::packets::ReplyChunk {
         request_id: 400.into(),
         chunk,
     };
@@ -111,7 +111,7 @@ async fn main() {
     // );
 
     let mut server = Server::new(runtime::server::ServerParams {
-        addr: "0.0.0.0:44332".parse().unwrap(),
+        addr: "0.0.0.0:4432".parse().unwrap(),
         compression: Compression::best(),
         coarsening: 50,
     });
@@ -123,6 +123,3 @@ async fn main() {
         std::hint::spin_loop()
     }
 }
-
-#[cfg(test)]
-mod tests {}

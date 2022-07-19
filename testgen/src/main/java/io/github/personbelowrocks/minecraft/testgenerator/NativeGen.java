@@ -14,7 +14,7 @@ public class NativeGen {
     private final double state;
     private static final Logger logger = Bukkit.getLogger();
     private static final String LIB_BIN = "/lib-bin/";
-    private static final String LIB_NAME = "rustgen";
+    private static final String LIB_NAME = "plugin_natives";
 
     /**
      * When packaged into JAR extracts DLLs, places these into

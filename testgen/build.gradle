@@ -18,12 +18,17 @@ repositories {
         name = 'sonatype'
         url = 'https://oss.sonatype.org/content/groups/public/'
     }
+    maven {
+        name = "worldedit"
+        url = "https://maven.enginehub.org/repo/"
+    }
 }
 
 dependencies {
     compileOnly 'io.papermc.paper:paper-api:1.18.2-R0.1-SNAPSHOT'
+    compileOnly 'com.sk89q.worldedit:worldedit-core:7.2.9-SNAPSHOT'
+    compileOnly 'com.sk89q.worldedit:worldedit-bukkit:7.2.9-SNAPSHOT'
     implementation group: 'commons-io', name: 'commons-io', version: '2.6'
-
 }
 
 def targetJavaVersion = 17
@@ -57,3 +62,8 @@ compileKotlin {
 compileTestKotlin {
     kotlinOptions.jvmTarget = "17"
 }
+
+shadowJar {
+    destinationDirectory = new File("./server/plugins")
+}
+

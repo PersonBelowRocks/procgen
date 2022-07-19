@@ -1,4 +1,5 @@
-use crate::{compress_packet, decompress_packet, jlong, jshort, JvmConstructable};
+use crate::{compress_packet, decompress_packet, jlong, jshort};
+use crate::{FromJvmObject, ToJvmObject};
 use common::packets::*;
 use jni::objects::JClass;
 use jni::sys::{jbyteArray, jobject};
@@ -15,27 +16,19 @@ pub extern "system" fn Java_io_github_personbelowrocks_minecraft_testgenerator_N
     let decompressed_buffer = decompress_packet(&compressed_buffer, size_hint as _);
     let id = decompressed_buffer.id();
 
-    let desc = match id {
-        GenerateChunk::ID => GenerateChunk::from_bincode(&decompressed_buffer)
-            .unwrap()
-            .desc(&env),
+    let obj = match id {
         ReplyChunk::ID => ReplyChunk::from_bincode(&decompressed_buffer)
             .unwrap()
-            .desc(&env),
+            .to_jvm_obj(&env),
         ConfirmGeneratorAddition::ID => {
             ConfirmGeneratorAddition::from_bincode(&decompressed_buffer)
                 .unwrap()
-                .desc(&env)
+                .to_jvm_obj(&env)
         }
         _ => panic!("invalid packet ID: {id}"),
     };
 
-    let jvm_class = env.find_class(desc.class).unwrap();
-    let jvm_packet_obj = env
-        .new_object(jvm_class, desc.ctor_sig, &desc.ctor_args.jvalue_buf())
-        .unwrap();
-
-    jvm_packet_obj.into_inner()
+    obj.into_inner()
 }
 
 #[no_mangle]
@@ -52,6 +45,10 @@ pub extern "system" fn Java_io_github_personbelowrocks_minecraft_testgenerator_N
         }
         GenerateChunk::ID => {
             let packet = GenerateChunk::from_jvm_obj(&env, jpacket.into()).unwrap();
+            packet.to_bincode()
+        }
+        GenerateRegion::ID => {
+            let packet = GenerateRegion::from_jvm_obj(&env, jpacket.into()).unwrap();
             packet.to_bincode()
         }
         _ => panic!("uh oh! {} is not a good ID :(", id),

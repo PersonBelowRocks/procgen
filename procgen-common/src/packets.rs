@@ -4,7 +4,10 @@ use std::{
     mem::size_of,
 };
 
-use crate::generation::{FactoryParameters, GenerationArgs};
+use crate::{
+    generation::{FactoryParameters, GenerationArgs},
+    IVec3,
+};
 
 use crate::{BlockId, Chunk, GeneratorId, RequestId};
 
@@ -199,4 +202,61 @@ impl ProtocolError {
 
 impl Packet for ProtocolError {
     const ID: u16 = 4;
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct GenerateRegion<'a> {
+    pub request_id: RequestId,
+    pub bounds: std::ops::Range<IVec3>,
+    pub params: Parameters<'a>,
+}
+
+impl<'a> Packet for GenerateRegion<'a> {
+    const ID: u16 = 5;
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct GenerateDynamic<'a> {
+    pub request_id: RequestId,
+    pub pos: IVec3,
+    pub params: Parameters<'a>,
+}
+
+impl<'a> Packet for GenerateDynamic<'a> {
+    const ID: u16 = 6;
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct FinishRequest {
+    pub request_id: RequestId,
+}
+
+impl Packet for FinishRequest {
+    const ID: u16 = 7;
+}
+
+#[derive(te::Error, Debug)]
+pub enum ParameterError {
+    #[error("No parameter with name {0}")]
+    DoesntExist(String),
+    #[error("Error parsing parameter with name {0}, raw data: {1}, details: {2}")]
+    ParseError(String, String, String),
+}
+
+#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Parameters<'a> {
+    // TODO: cache hashmap or something in here
+    data: PhantomData<&'a ()>,
+}
+
+impl<'a> Parameters<'a> {
+    pub fn new() -> Self {
+        Self {
+            data: Default::default(),
+        }
+    }
+
+    pub fn get_parameter<T>(&self, name: &str) -> Result<T, ParameterError> {
+        todo!()
+    }
 }

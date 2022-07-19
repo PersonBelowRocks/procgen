@@ -2,4 +2,4 @@
 ./Cargo.lock
 /testgen/server
 /testgen/decompile
-/testgen/src/main/resources/lib-bin/rustgen.dll
+/testgen/src/main/resources/lib-bin/*

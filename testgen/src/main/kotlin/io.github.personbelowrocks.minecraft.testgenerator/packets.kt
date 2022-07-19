@@ -1,9 +1,12 @@
 package io.github.personbelowrocks.minecraft.testgenerator
 
+import com.sk89q.worldedit.math.BlockVector3
+
 interface Packet {
     fun toBytes(): Array<Byte>;
 }
 
+// TODO: this should use 2 vector objects instead of a shitload of constructor parameters
 class Chunk(val sections: Array<ChunkSection>, val x1: Long, val y1: Long, val z1: Long, val x2: Long, val y2: Long, val z2: Long) {
     fun len(): Int {
         return this.sections.size
@@ -13,6 +16,17 @@ class Chunk(val sections: Array<ChunkSection>, val x1: Long, val y1: Long, val z
         return "Chunk {" +
                 "   " +
                 "}"
+    }
+}
+
+class GenerateRegion(
+    val requestId: Long,
+    val pos1: BlockVector3,
+    val pos2: BlockVector3,
+    val params: String,
+): Packet {
+    override fun toBytes(): Array<Byte> {
+        return NativeBindings.encodePacket(5, this).toTypedArray()
     }
 }
 

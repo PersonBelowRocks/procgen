@@ -3,6 +3,8 @@ pub use chunk::*;
 
 pub mod generation;
 pub mod packets;
+mod traits;
+pub use traits::*;
 
 extern crate downcast_rs as dc;
 extern crate nalgebra as na;

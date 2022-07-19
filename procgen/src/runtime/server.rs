@@ -17,14 +17,11 @@ use crate::generation::{ChunkGenerator, DynChunkGenerator, DynGeneratorFactory};
 use common::generation::{FactoryParameters, GenerationArgs};
 
 use super::{
-    net::{
-        packets::{self, ProtocolError, ProtocolErrorKind, ReplyChunk},
-        Networker,
-    },
+    net::Networker,
     util::{GenerationIdent, RequestIdent},
 };
 
-use common::{Chunk, GeneratorId};
+use common::{packets, Chunk, GeneratorId};
 
 #[derive(Debug)]
 enum GenerationResult {
@@ -243,6 +240,12 @@ impl Server {
                         match packet {
                             Ok(packet) => {
                                 if let Some(packet) =
+                                    packet.downcast_ref::<packets::GenerateRegion>()
+                                {
+                                    log::info!("Received request to generate region: {packet:?}")
+                                }
+
+                                if let Some(packet) =
                                     packet.downcast_ref::<packets::GenerateChunk>()
                                 {
                                     let request_ident =
@@ -284,9 +287,11 @@ impl Server {
                                 }
                             }
                             Err(error) => {
-                                conn.send_packet(&ProtocolError::fatal(ProtocolErrorKind::Other {
-                                    details: error.to_string(),
-                                }))
+                                conn.send_packet(&packets::ProtocolError::fatal(
+                                    packets::ProtocolErrorKind::Other {
+                                        details: error.to_string(),
+                                    },
+                                ))
                                 .await
                                 .unwrap();
                             }
@@ -313,7 +318,7 @@ impl Server {
                     for completed in receiver.completed().await.collect::<Vec<_>>().into_iter() {
                         match completed {
                             GenerationResult::Success(ident, chunk) => {
-                                let packet = ReplyChunk {
+                                let packet = packets::ReplyChunk {
                                     request_id: ident.into(),
                                     chunk,
                                 };
@@ -341,9 +346,12 @@ impl Server {
 
         self.running.store(true, Ordering::SeqCst);
 
+        log::info!("Starting internal networker...");
         self.net.run().await.unwrap();
 
+        log::info!("Starting client request handler...");
         self.start_client_request_handler();
+        log::info!("Starting chunk distributor...");
         self.start_chunk_distributor();
     }
 }

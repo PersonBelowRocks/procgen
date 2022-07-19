@@ -1,24 +1,10 @@
-use crate::{CtorArgs, JvmConstructable, NamedJObject, QualifiedJValue};
+use crate::{CtorArgs, FromJvmObject, NamedJObject, QualifiedJValue, ToJvmObject, CHUNK_PATH};
 use common::packets::*;
-use jni::objects::JValue;
+use jni::objects::{JObject, JValue};
 use jni::JNIEnv;
-use procgen_common::Chunk;
 
-impl JvmConstructable for GenerateChunk {
-    const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/GenerateChunk";
-
-    fn ctor_args<'a>(&self, _env: &JNIEnv<'a>) -> CtorArgs<'a> {
-        let mut args = CtorArgs::new();
-
-        args.add(QualifiedJValue::Long(self.request_id.0.into()))
-            .add(QualifiedJValue::Long(self.generator_id.0.into()))
-            .add(QualifiedJValue::Int(self.pos.x))
-            .add(QualifiedJValue::Int(self.pos.y));
-
-        args
-    }
-
-    fn from_jvm_obj(env: &JNIEnv<'_>, obj: jni::objects::JObject<'_>) -> Option<Self> {
+impl FromJvmObject for GenerateChunk {
+    fn from_jvm_obj(env: &JNIEnv<'_>, obj: JObject<'_>) -> Option<Self> {
         match (
             env.call_method(obj, "getRequestId", "()J", &[]).ok()?,
             env.call_method(obj, "getGeneratorId", "()J", &[]).ok()?,
@@ -40,55 +26,25 @@ impl JvmConstructable for GenerateChunk {
     }
 }
 
-impl JvmConstructable for ReplyChunk {
-    const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/ReplyChunk";
-
-    fn ctor_args<'b, 'a>(&self, env: &JNIEnv<'a>) -> CtorArgs<'a> {
+const REPLY_CHUNK_PATH: &str = "io/github/personbelowrocks/minecraft/testgenerator/ReplyChunk";
+impl ToJvmObject for ReplyChunk {
+    fn to_jvm_obj<'a>(&self, env: &JNIEnv<'a>) -> JObject<'a> {
         let mut args = CtorArgs::new();
 
         args.add(QualifiedJValue::Long(self.request_id.0.into()));
 
-        let chunk_ctor_args = self.chunk.ctor_args(env);
-        let chunk_obj = env
-            .new_object(
-                env.find_class(Chunk::CLASS).unwrap(),
-                chunk_ctor_args.signature(),
-                &chunk_ctor_args.jvalue_buf(),
-            )
-            .unwrap();
+        let chunk_obj = self.chunk.to_jvm_obj(env);
         args.add(QualifiedJValue::Object(NamedJObject::new(
-            format!("L{};", Chunk::CLASS),
+            format!("L{};", CHUNK_PATH),
             chunk_obj,
         )));
 
-        args
-    }
-
-    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
-        // we're probably never gonna need an implementation here because we don't need to transmit this packet to the server.
-        todo!()
+        args.call(REPLY_CHUNK_PATH, env).unwrap()
     }
 }
 
-impl JvmConstructable for AddGenerator {
-    const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/ReplyChunk";
-
-    fn ctor_args<'a>(&self, env: &JNIEnv<'a>) -> CtorArgs<'a> {
-        let mut args = CtorArgs::new();
-
-        args.add(QualifiedJValue::Long(self.request_id.0.into()))
-            .add(QualifiedJValue::Object(NamedJObject::new(
-                "Ljava/lang/String;".into(),
-                env.new_string(&self.name).unwrap().into(),
-            )))
-            .add(QualifiedJValue::Int(self.min_height))
-            .add(QualifiedJValue::Int(self.max_height))
-            .add(QualifiedJValue::Long(self.default_id.0.into()));
-
-        args
-    }
-
-    fn from_jvm_obj(env: &JNIEnv<'_>, obj: jni::objects::JObject<'_>) -> Option<Self> {
+impl FromJvmObject for AddGenerator {
+    fn from_jvm_obj(env: &JNIEnv<'_>, obj: JObject<'_>) -> Option<Self> {
         match (
             env.call_method(obj, "getRequestId", "()J", &[]).ok()?,
             env.call_method(obj, "getName", "()Ljava/lang/String;", &[])
@@ -118,28 +74,23 @@ impl JvmConstructable for AddGenerator {
     }
 }
 
-impl JvmConstructable for ConfirmGeneratorAddition {
-    const CLASS: &'static str =
-        "io/github/personbelowrocks/minecraft/testgenerator/ConfirmGeneratorAddition";
-
-    fn ctor_args<'a>(&self, _env: &JNIEnv<'a>) -> CtorArgs<'a> {
+const CONFIRM_GENERATOR_ADDITION_PATH: &str =
+    "io/github/personbelowrocks/minecraft/testgenerator/ConfirmGeneratorAddition";
+impl ToJvmObject for ConfirmGeneratorAddition {
+    fn to_jvm_obj<'a>(&self, env: &JNIEnv<'a>) -> JObject<'a> {
         let mut args = CtorArgs::new();
 
         args.add(QualifiedJValue::Long(self.request_id.0.into()))
             .add(QualifiedJValue::Long(self.generator_id.0.into()));
 
-        args
-    }
-
-    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
-        todo!()
+        args.call(CONFIRM_GENERATOR_ADDITION_PATH, env).unwrap()
     }
 }
 
-impl JvmConstructable for ProtocolError {
-    const CLASS: &'static str = "io/github/personbelowrocks/minecraft/testgenerator/ProtocolError";
-
-    fn ctor_args<'a>(&self, env: &JNIEnv<'a>) -> CtorArgs<'a> {
+const PROTOCOL_ERROR_PATH: &str =
+    "io/github/personbelowrocks/minecraft/testgenerator/ProtocolError";
+impl ToJvmObject for ProtocolError {
+    fn to_jvm_obj<'a>(&self, env: &JNIEnv<'a>) -> JObject<'a> {
         let mut args = CtorArgs::new();
 
         args.add(QualifiedJValue::Bool(self.fatal.into()))
@@ -148,10 +99,39 @@ impl JvmConstructable for ProtocolError {
                 env.new_string(format!("{:?}", self)).unwrap().into(),
             )));
 
-        args
+        args.call(PROTOCOL_ERROR_PATH, env).unwrap()
     }
+}
 
-    fn from_jvm_obj(_env: &JNIEnv<'_>, _obj: jni::objects::JObject<'_>) -> Option<Self> {
-        todo!()
+const BLOCK_VECTOR_PATH: &str = "com/sk89q/worldedit/math/BlockVector3";
+impl<'a> FromJvmObject for GenerateRegion<'a> {
+    fn from_jvm_obj(env: &JNIEnv<'_>, obj: JObject<'_>) -> Option<Self> {
+        if let (
+            JValue::Long(request_id),
+            JValue::Object(pos1_obj),
+            JValue::Object(pos2_obj),
+            JValue::Object(_params_obj),
+        ) = (
+            env.call_method(obj, "getRequestId", "()J", &[]).ok()?,
+            env.call_method(obj, "getPos1", &format!("()L{};", BLOCK_VECTOR_PATH), &[])
+                .ok()?,
+            env.call_method(obj, "getPos2", &format!("()L{};", BLOCK_VECTOR_PATH), &[])
+                .ok()?,
+            env.call_method(obj, "getParams", "()Ljava/lang/String;", &[])
+                .ok()?,
+        ) {
+            let pos1 = na::Vector3::<i32>::from_jvm_obj(env, pos1_obj)?;
+            let pos2 = na::Vector3::<i32>::from_jvm_obj(env, pos2_obj)?;
+
+            let params = Parameters::default();
+
+            Some(GenerateRegion {
+                request_id: (request_id as u32).into(),
+                bounds: pos1..pos2,
+                params,
+            })
+        } else {
+            None
+        }
     }
 }
