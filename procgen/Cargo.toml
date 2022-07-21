@@ -17,6 +17,8 @@ downcast-rs = "1.2"
 rand = "0.8.5"
 bracket-noise = "0.8.2"
 procgen-common = {path = "../procgen-common"}
+anymap = "0.12.1"
+async-trait = "0.1.56"
 
 [dependencies.tokio]
 version = "1.17"
