@@ -114,7 +114,8 @@ async fn main() {
         addr: "0.0.0.0:4432".parse().unwrap(),
         compression: Compression::best(),
         coarsening: 50,
-    });
+    })
+    .await;
     server.add_generator::<MockGenerator>().await;
 
     server.run().await;

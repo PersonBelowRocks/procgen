@@ -305,7 +305,7 @@ impl std::fmt::Debug for Connection {
 }
 
 #[derive(Copy, Clone)]
-pub(crate) struct Params {
+pub struct Params {
     pub(crate) addr: SocketAddrV4,
     pub(crate) compression: Compression,
 }
@@ -320,7 +320,7 @@ impl From<ServerParams> for Params {
 }
 
 #[derive(Clone)]
-pub(crate) struct Networker {
+pub struct Networker {
     params: Params,
     listener: Option<Arc<Mutex<TcpListener>>>,
     connections: Shared<ConnectionMap>,

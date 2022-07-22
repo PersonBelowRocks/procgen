@@ -17,6 +17,8 @@ use crate::generation::{ChunkGenerator, DynChunkGenerator, DynGeneratorFactory};
 use common::generation::{FactoryParameters, GenerationArgs};
 
 use super::{
+    dispatcher::Dispatcher,
+    events::{self, ChunkFinished, Context, IncomingPacket},
     net::Networker,
     util::{GenerationIdent, RequestIdent},
 };
@@ -24,7 +26,7 @@ use super::{
 use common::{packets, Chunk, GeneratorId};
 
 #[derive(Debug)]
-enum GenerationResult {
+pub enum GenerationResult {
     Success(GenerationIdent, Chunk),
     Failure(GenerationIdent, Error),
 }
@@ -45,7 +47,7 @@ impl GenerationResult {
     }
 }
 
-struct CompletedChunksIterator(std::vec::IntoIter<GenerationResult>);
+pub struct CompletedChunksIterator(std::vec::IntoIter<GenerationResult>);
 
 impl Iterator for CompletedChunksIterator {
     type Item = GenerationResult;
@@ -57,11 +59,11 @@ impl Iterator for CompletedChunksIterator {
 
 #[derive(Debug, te::Error)]
 #[error("Generator not found with ID {0}")]
-struct ManagerSubmitError(GeneratorId);
+pub struct ManagerSubmitError(GeneratorId);
 
 #[derive(Debug, te::Error)]
 #[error("Couldn't find generator factory with name '{0}'")]
-struct UnknownFactoryError<'a>(&'a str);
+pub struct UnknownFactoryError<'a>(&'a str);
 
 #[derive(Clone)]
 struct ChunkReceiver {
@@ -81,7 +83,7 @@ impl ChunkReceiver {
     }
 }
 
-struct GeneratorManager {
+pub struct GeneratorManager {
     factories: HashMap<&'static str, Box<dyn DynGeneratorFactory>>,
     instances: HashMap<GeneratorId, Arc<Box<dyn DynChunkGenerator>>>,
     workers: Mutex<ThreadPool>,
@@ -194,15 +196,20 @@ pub struct Server {
     generators: Arc<Mutex<GeneratorManager>>,
     params: ServerParams,
     running: Arc<AtomicBool>,
+    dispatcher: Arc<Dispatcher<Context>>,
 }
 
 impl Server {
-    pub fn new(params: ServerParams) -> Self {
+    pub async fn new(params: ServerParams) -> Self {
+        let dispatcher = Dispatcher::new(20);
+        events::defaults(&dispatcher).await;
+
         Self {
             net: Networker::new(params.into()),
             generators: Mutex::new(GeneratorManager::new()).into(),
             params,
             running: Arc::new(AtomicBool::from(false)),
+            dispatcher: Arc::new(dispatcher),
         }
     }
 
@@ -230,6 +237,7 @@ impl Server {
         let running = self.running.clone();
         let net = self.net.clone();
         let manager = self.generators.clone();
+        let dispatcher = self.dispatcher.clone();
 
         // This thread submits chunks for generation and registers generators at the request of clients.
         tokio::spawn(async move {
@@ -239,52 +247,21 @@ impl Server {
                     for (conn, packet) in net.incoming().await {
                         match packet {
                             Ok(packet) => {
-                                if let Some(packet) =
-                                    packet.downcast_ref::<packets::GenerateRegion>()
-                                {
-                                    log::info!("Received request to generate region: {packet:?}")
-                                }
+                                let event = IncomingPacket {
+                                    connection: conn,
+                                    packet: packet.into(),
+                                };
 
-                                if let Some(packet) =
-                                    packet.downcast_ref::<packets::GenerateChunk>()
-                                {
-                                    let request_ident =
-                                        RequestIdent::new(packet.request_id, conn.id());
-
-                                    {
-                                        if let Err(error) = manager
-                                            .lock()
-                                            .await
-                                            .submit_chunk(
-                                                request_ident,
-                                                packet.generator_id,
-                                                packet.args(),
-                                            )
-                                            .await
-                                        {
-                                            log::error!("Request {request_ident:?} failed when submitting chunk for generation: {error}");
-                                        }
-                                    }
-                                }
-
-                                if let Some(packet) = packet.downcast_ref::<packets::AddGenerator>()
-                                {
-                                    let request_ident =
-                                        RequestIdent::new(packet.request_id, conn.id());
-
-                                    if let Ok(generator_id) = manager
-                                        .lock()
-                                        .await
-                                        .register_generator(&packet.name, packet.factory_params())
-                                    {
-                                        conn.send_packet(&packets::ConfirmGeneratorAddition::new(
-                                            request_ident.request_id,
-                                            generator_id,
-                                        ))
-                                        .await
-                                        .unwrap();
-                                    }
-                                }
+                                dispatcher
+                                    .fire_event(
+                                        Context {
+                                            dispatcher: dispatcher.clone(),
+                                            generators: manager.clone(),
+                                            networker: net.clone(),
+                                        },
+                                        event,
+                                    )
+                                    .await;
                             }
                             Err(error) => {
                                 conn.send_packet(&packets::ProtocolError::fatal(
@@ -309,30 +286,25 @@ impl Server {
 
         // We don't need this function to be async, doing so would just add needless complexity, so we access the async mutex by blocking.
         let receiver = tokio::task::block_in_place(|| self.generators.blocking_lock().receiver());
+        let generators = self.generators.clone();
         let net = self.net.clone();
         let running = self.running.clone();
+        let dispatcher = self.dispatcher.clone();
 
         tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
                 for _ in 0..coarsening {
                     for completed in receiver.completed().await.collect::<Vec<_>>().into_iter() {
-                        match completed {
-                            GenerationResult::Success(ident, chunk) => {
-                                let packet = packets::ReplyChunk {
-                                    request_id: ident.into(),
-                                    chunk,
-                                };
+                        let ctx = Context {
+                            dispatcher: dispatcher.clone(),
+                            generators: generators.clone(),
+                            networker: net.clone(),
+                        };
+                        let event = ChunkFinished {
+                            result: Arc::new(completed),
+                        };
 
-                                if let Some(conn) = net.connection(ident.into()).await {
-                                    conn.send_packet(&packet).await.unwrap();
-                                }
-                            }
-                            GenerationResult::Failure(ident, error) => {
-                                log::error!("Request {ident:?} failed: {error}");
-                                // let net_error = ProtocolErrorKind::ChunkGenerationFailure { generator_id: , request_id: () };
-                                // let packet = ProtocolError::gentle()
-                            }
-                        }
+                        dispatcher.fire_event(ctx, event).await;
                     }
                 }
             }

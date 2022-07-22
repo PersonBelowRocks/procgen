@@ -104,7 +104,7 @@ impl ToJvmObject for ProtocolError {
 }
 
 const BLOCK_VECTOR_PATH: &str = "com/sk89q/worldedit/math/BlockVector3";
-impl<'a> FromJvmObject for GenerateRegion<'a> {
+impl FromJvmObject for GenerateRegion {
     fn from_jvm_obj(env: &JNIEnv<'_>, obj: JObject<'_>) -> Option<Self> {
         if let (
             JValue::Long(request_id),

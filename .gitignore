@@ -3,3 +3,4 @@
 /testgen/server
 /testgen/decompile
 /testgen/src/main/resources/lib-bin/*
+/testgen/bin

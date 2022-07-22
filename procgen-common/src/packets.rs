@@ -13,7 +13,7 @@ use crate::{BlockId, Chunk, GeneratorId, RequestId};
 
 pub trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
 
-pub trait Packet: serde::Serialize + serde::de::DeserializeOwned {
+pub trait Packet: serde::Serialize + serde::de::DeserializeOwned + Clone {
     const ID: u16;
 
     fn to_bincode(&self) -> Result<PacketBuffer, PacketBufferError> {
@@ -92,7 +92,7 @@ impl AsRef<[u8]> for PacketBuffer {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct GenerateChunk {
     pub request_id: RequestId,
     pub generator_id: GeneratorId,
@@ -109,7 +109,7 @@ impl Packet for GenerateChunk {
     const ID: u16 = 0;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ReplyChunk {
     pub request_id: RequestId,
     pub chunk: Chunk,
@@ -119,7 +119,7 @@ impl Packet for ReplyChunk {
     const ID: u16 = 1;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AddGenerator {
     pub request_id: RequestId,
     pub name: String,
@@ -144,7 +144,7 @@ impl Packet for AddGenerator {
     const ID: u16 = 2;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ConfirmGeneratorAddition {
     pub request_id: RequestId,
     pub generator_id: GeneratorId,
@@ -163,7 +163,7 @@ impl Packet for ConfirmGeneratorAddition {
     const ID: u16 = 3;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ProtocolErrorKind {
     Other {
@@ -184,7 +184,7 @@ pub enum ProtocolErrorKind {
 }
 
 // TODO: finish implementing this
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolError {
     pub kind: ProtocolErrorKind,
     pub fatal: bool,
@@ -204,29 +204,29 @@ impl Packet for ProtocolError {
     const ID: u16 = 4;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct GenerateRegion<'a> {
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct GenerateRegion {
     pub request_id: RequestId,
     pub bounds: std::ops::Range<IVec3>,
-    pub params: Parameters<'a>,
+    pub params: Parameters,
 }
 
-impl<'a> Packet for GenerateRegion<'a> {
+impl Packet for GenerateRegion {
     const ID: u16 = 5;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct GenerateDynamic<'a> {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct GenerateDynamic {
     pub request_id: RequestId,
     pub pos: IVec3,
-    pub params: Parameters<'a>,
+    pub params: Parameters,
 }
 
-impl<'a> Packet for GenerateDynamic<'a> {
+impl Packet for GenerateDynamic {
     const ID: u16 = 6;
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FinishRequest {
     pub request_id: RequestId,
 }
@@ -243,17 +243,14 @@ pub enum ParameterError {
     ParseError(String, String, String),
 }
 
-#[derive(Default, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Parameters<'a> {
+#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Parameters {
     // TODO: cache hashmap or something in here
-    data: PhantomData<&'a ()>,
 }
 
-impl<'a> Parameters<'a> {
+impl Parameters {
     pub fn new() -> Self {
-        Self {
-            data: Default::default(),
-        }
+        todo!()
     }
 
     pub fn get_parameter<T>(&self, name: &str) -> Result<T, ParameterError> {

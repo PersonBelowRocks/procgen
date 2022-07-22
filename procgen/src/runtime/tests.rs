@@ -220,7 +220,7 @@ async fn end_to_end_server_test() {
         coarsening: 100,
     };
 
-    let mut server = Server::new(params);
+    let mut server = Server::new(params).await;
 
     server.add_generator::<MockGenerator>().await;
 
@@ -281,7 +281,7 @@ async fn server_stopping() {
         coarsening: 100,
     };
 
-    let mut server = Server::new(params);
+    let mut server = Server::new(params).await;
     server.add_generator::<MockGenerator>().await;
     server.run().await;
 
