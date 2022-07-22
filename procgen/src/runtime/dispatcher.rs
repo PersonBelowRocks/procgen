@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use anymap::*;
-use tokio::sync::{broadcast as bcst, mpsc, Mutex};
+use tokio::sync::{broadcast as bcst, mpsc, RwLock};
 
 type Ev<Ctx, E> = (Arc<Ctx>, E);
 
@@ -51,14 +51,14 @@ impl<Ctx, E: SingleEvent> SingleEventProvider<Ctx, E> {
 }
 
 struct BcstSenderStorage<Ctx: DispatcherContext> {
-    inner: Mutex<Map<dyn anymap::any::Any + Send>>,
+    inner: RwLock<Map<dyn anymap::any::Any + Send + Sync>>,
     _ctx: PhantomData<Ctx>,
 }
 
 impl<Ctx: DispatcherContext> BcstSenderStorage<Ctx> {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(Map::new()),
+            inner: RwLock::new(Map::new()),
             _ctx: PhantomData,
         }
     }
@@ -67,7 +67,7 @@ impl<Ctx: DispatcherContext> BcstSenderStorage<Ctx> {
         &self,
         buffer_size: usize,
     ) -> bcst::Receiver<Ev<Ctx, E>> {
-        let mut guard = self.inner.lock().await;
+        let mut guard = self.inner.write().await;
         if let Some(tx) = guard.get::<bcst::Sender<Ev<Ctx, E>>>() {
             tx.subscribe()
         } else {
@@ -79,7 +79,7 @@ impl<Ctx: DispatcherContext> BcstSenderStorage<Ctx> {
 
     pub async fn fire<E: BroadcastedEvent>(&self, ctx: Ctx, event: E) -> bool {
         self.inner
-            .lock()
+            .read()
             .await
             .get::<bcst::Sender<Ev<Ctx, E>>>()
             .and_then(|tx| tx.send((Arc::new(ctx), event)).ok())
@@ -88,14 +88,14 @@ impl<Ctx: DispatcherContext> BcstSenderStorage<Ctx> {
 }
 
 struct SingleSenderStorage<Ctx: DispatcherContext> {
-    inner: Mutex<Map<dyn anymap::any::Any + Send + Sync>>,
+    inner: RwLock<Map<dyn anymap::any::Any + Send + Sync>>,
     _ctx: PhantomData<Ctx>,
 }
 
 impl<Ctx: DispatcherContext> SingleSenderStorage<Ctx> {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(Map::new()),
+            inner: RwLock::new(Map::new()),
             _ctx: PhantomData,
         }
     }
@@ -104,7 +104,7 @@ impl<Ctx: DispatcherContext> SingleSenderStorage<Ctx> {
         &self,
         buffer_size: usize,
     ) -> Option<mpsc::Receiver<Ev<Ctx, E>>> {
-        let mut guard = self.inner.lock().await;
+        let mut guard = self.inner.write().await;
         if guard.contains::<mpsc::Sender<Ev<Ctx, E>>>() {
             None
         } else {
@@ -115,7 +115,7 @@ impl<Ctx: DispatcherContext> SingleSenderStorage<Ctx> {
     }
 
     pub async fn fire<E: SingleEvent>(&self, ctx: Ctx, event: E) -> bool {
-        if let Some(tx) = self.inner.lock().await.get::<mpsc::Sender<Ev<Ctx, E>>>() {
+        if let Some(tx) = self.inner.read().await.get::<mpsc::Sender<Ev<Ctx, E>>>() {
             tx.send((Arc::new(ctx), event)).await.is_ok()
         } else {
             false
