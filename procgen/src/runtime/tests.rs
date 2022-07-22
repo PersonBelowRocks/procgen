@@ -365,7 +365,7 @@ async fn server_stopping() {
 
 // TODO: more dispatcher tests!
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn dispatcher() {
+async fn dispatcher_broadcast() {
     use crate::runtime::dispatcher::*;
 
     #[derive(Clone)]
@@ -373,7 +373,11 @@ async fn dispatcher() {
 
     #[async_trait::async_trait]
     impl DispatcherContext for Context {
-        async fn fire_event<E: Event>(&self, event: E) -> bool {
+        async fn broadcast_event<E: BroadcastedEvent>(&self, event: E) -> bool {
+            self.0.broadcast_event(self.clone(), event).await
+        }
+
+        async fn fire_event<E: SingleEvent>(&self, event: E) -> bool {
             self.0.fire_event(self.clone(), event).await
         }
     }
@@ -386,7 +390,59 @@ async fn dispatcher() {
 
     let dispatcher = Arc::new(Dispatcher::<Context>::new(20));
 
-    let mut handle = dispatcher.handler::<SomeEvent>().await;
+    let mut handle = dispatcher.broadcast_handler::<SomeEvent>().await;
+
+    let j = tokio::spawn(async move {
+        while let Some((ctx, event)) = handle.next().await {
+            assert_eq!(event.0, 42);
+
+            ctx.broadcast_event(OtherEvent(420)).await;
+        }
+    });
+
+    let mut handle = dispatcher.broadcast_handler::<OtherEvent>().await;
+    let k = tokio::spawn(async move {
+        while let Some((_ctx, event)) = handle.next().await {
+            assert_eq!(event.0, 420);
+        }
+    });
+
+    dispatcher
+        .broadcast_event(Context(dispatcher.clone()), SomeEvent(42))
+        .await;
+    drop(dispatcher);
+
+    assert!(j.await.is_ok());
+    assert!(k.await.is_ok());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn dispatcher_single() {
+    use crate::runtime::dispatcher::*;
+
+    #[derive(Clone)]
+    struct Context(Arc<Dispatcher<Self>>);
+
+    #[async_trait::async_trait]
+    impl DispatcherContext for Context {
+        async fn broadcast_event<E: BroadcastedEvent>(&self, event: E) -> bool {
+            self.0.broadcast_event(self.clone(), event).await
+        }
+
+        async fn fire_event<E: SingleEvent>(&self, event: E) -> bool {
+            self.0.fire_event(self.clone(), event).await
+        }
+    }
+
+    #[derive(Clone)]
+    struct SomeEvent(i32);
+
+    #[derive(Clone)]
+    struct OtherEvent(i32);
+
+    let dispatcher = Arc::new(Dispatcher::<Context>::new(20));
+
+    let mut handle = dispatcher.single_handler::<SomeEvent>().await.unwrap();
 
     let j = tokio::spawn(async move {
         while let Some((ctx, event)) = handle.next().await {
@@ -396,7 +452,7 @@ async fn dispatcher() {
         }
     });
 
-    let mut handle = dispatcher.handler::<OtherEvent>().await;
+    let mut handle = dispatcher.single_handler::<OtherEvent>().await.unwrap();
     let k = tokio::spawn(async move {
         while let Some((_ctx, event)) = handle.next().await {
             assert_eq!(event.0, 420);

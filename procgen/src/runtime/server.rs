@@ -253,7 +253,7 @@ impl Server {
                                 };
 
                                 dispatcher
-                                    .fire_event(
+                                    .broadcast_event(
                                         Context {
                                             dispatcher: dispatcher.clone(),
                                             generators: manager.clone(),
@@ -300,9 +300,7 @@ impl Server {
                             generators: generators.clone(),
                             networker: net.clone(),
                         };
-                        let event = ChunkFinished {
-                            result: Arc::new(completed),
-                        };
+                        let event = ChunkFinished { result: completed };
 
                         dispatcher.fire_event(ctx, event).await;
                     }

@@ -1,35 +1,35 @@
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 use procgen_common::packets::{self, DowncastPacket, Packet};
 use tokio::sync::Mutex;
 
 use super::{
-    dispatcher::{self, Dispatcher, DispatcherContext, EventProvider},
+    dispatcher::{self, BcstEventProvider, Dispatcher, DispatcherContext, SingleEventProvider},
     net::{Connection, Networker},
     server::{GenerationResult, GeneratorManager},
     util::RequestIdent,
 };
 
 pub async fn defaults(dispatcher: &Dispatcher<Context>) {
-    let provider = dispatcher.handler::<IncomingPacket>().await;
+    let provider = dispatcher.broadcast_handler::<IncomingPacket>().await;
     tokio::spawn(handle_incoming_packet(provider));
 
     let provider = dispatcher
-        .handler::<ReceivedPacket<packets::GenerateRegion>>()
+        .broadcast_handler::<ReceivedPacket<packets::GenerateRegion>>()
         .await;
     tokio::spawn(handle_generate_region(provider));
 
     let provider = dispatcher
-        .handler::<ReceivedPacket<packets::GenerateChunk>>()
+        .broadcast_handler::<ReceivedPacket<packets::GenerateChunk>>()
         .await;
     tokio::spawn(handle_generate_chunk(provider));
 
     let provider = dispatcher
-        .handler::<ReceivedPacket<packets::AddGenerator>>()
+        .broadcast_handler::<ReceivedPacket<packets::AddGenerator>>()
         .await;
     tokio::spawn(handle_add_generator(provider));
 
-    let provider = dispatcher.handler::<ChunkFinished>().await;
+    let provider = dispatcher.single_handler::<ChunkFinished>().await.unwrap();
     tokio::spawn(handle_generated_chunk(provider));
 }
 
@@ -42,7 +42,11 @@ pub struct Context {
 
 #[async_trait::async_trait]
 impl dispatcher::DispatcherContext for Context {
-    async fn fire_event<E: dispatcher::Event>(&self, event: E) -> bool {
+    async fn broadcast_event<E: dispatcher::BroadcastedEvent>(&self, event: E) -> bool {
+        self.dispatcher.broadcast_event(self.clone(), event).await
+    }
+
+    async fn fire_event<E: dispatcher::SingleEvent>(&self, event: E) -> bool {
         self.dispatcher.fire_event(self.clone(), event).await
     }
 }
@@ -59,12 +63,11 @@ pub struct ReceivedPacket<P: Packet> {
     packet: Arc<P>,
 }
 
-#[derive(Clone)]
 pub struct ChunkFinished {
-    pub result: Arc<GenerationResult>,
+    pub result: GenerationResult,
 }
 
-type Prov<E> = EventProvider<Context, E>;
+type Prov<E> = BcstEventProvider<Context, E>;
 type PRecv<P> = Prov<ReceivedPacket<P>>;
 
 async fn handle_incoming_packet(mut provider: Prov<IncomingPacket>) {
@@ -75,7 +78,7 @@ async fn handle_incoming_packet(mut provider: Prov<IncomingPacket>) {
                 packet: Arc::new(packet.clone()),
             };
 
-            ctx.fire_event(packet).await;
+            ctx.broadcast_event(packet).await;
         }
 
         if let Some(packet) = event.packet.downcast_ref::<packets::GenerateChunk>() {
@@ -84,7 +87,7 @@ async fn handle_incoming_packet(mut provider: Prov<IncomingPacket>) {
                 packet: Arc::new(packet.clone()),
             };
 
-            ctx.fire_event(packet).await;
+            ctx.broadcast_event(packet).await;
         }
 
         if let Some(packet) = event.packet.downcast_ref::<packets::AddGenerator>() {
@@ -93,7 +96,7 @@ async fn handle_incoming_packet(mut provider: Prov<IncomingPacket>) {
                 packet: Arc::new(packet.clone()),
             };
 
-            ctx.fire_event(packet).await;
+            ctx.broadcast_event(packet).await;
         }
     }
 }
@@ -147,20 +150,16 @@ async fn handle_add_generator(mut provider: PRecv<packets::AddGenerator>) {
     }
 }
 
-async fn handle_generated_chunk(mut provider: EventProvider<Context, ChunkFinished>) {
+async fn handle_generated_chunk(mut provider: SingleEventProvider<Context, ChunkFinished>) {
     while let Some((ctx, event)) = provider.next().await {
-        match event.result.deref() {
+        match event.result {
             GenerationResult::Success(ident, chunk) => {
                 let packet = packets::ReplyChunk {
-                    request_id: ident.request_ident.request_id,
-                    chunk: chunk.clone(),
+                    request_id: ident.into(),
+                    chunk,
                 };
 
-                if let Some(conn) = ctx
-                    .networker
-                    .connection(ident.request_ident.client_id)
-                    .await
-                {
+                if let Some(conn) = ctx.networker.connection(ident.into()).await {
                     conn.send_packet(&packet).await.unwrap();
                 }
             }
