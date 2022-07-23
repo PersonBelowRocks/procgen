@@ -145,7 +145,7 @@ async fn networker_recv() {
     client.send_packet(&packet).unwrap();
 
     // we need to sleep a lil so the packet has time to arrive
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(75)).await;
 
     for incoming in networker.incoming().await {
         let packet = incoming
@@ -181,7 +181,7 @@ async fn networker_send() {
 
     client.send_packet(&generate_chunk_packet).unwrap();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(75)).await;
 
     let mut chunk = Chunk::new(77.into(), na::vector![-6, 2], -64, 320);
     chunk.set(Spaces::Cs([10i32, 120, 8]), 80.into());
@@ -202,7 +202,7 @@ async fn networker_send() {
         conn.send_packet(&chunk_packet).await.unwrap();
     }
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // tokio::time::sleep(Duration::from_millis(500)).await;
 
     let received_packet = client.read_packet::<ReplyChunk>().unwrap();
 
@@ -238,7 +238,7 @@ async fn end_to_end_server_test() {
         })
         .unwrap();
 
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(Duration::from_millis(75)).await;
 
     let generator_id = {
         let packet = client
@@ -256,7 +256,7 @@ async fn end_to_end_server_test() {
         })
         .unwrap();
 
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(Duration::from_millis(75)).await;
 
     let packet = client.read_packet::<packets::ReplyChunk>().unwrap();
     assert_eq!(packet.request_id, 420.into());
@@ -298,7 +298,7 @@ async fn server_stopping() {
             })
             .unwrap();
 
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(Duration::from_millis(75));
 
         let packet1 = client1
             .read_packet::<packets::ConfirmGeneratorAddition>()
@@ -322,7 +322,7 @@ async fn server_stopping() {
             })
             .unwrap();
 
-        std::thread::sleep(Duration::from_millis(250));
+        std::thread::sleep(Duration::from_millis(75));
 
         let packet2 = client2
             .read_packet::<packets::ConfirmGeneratorAddition>()
@@ -337,7 +337,7 @@ async fn server_stopping() {
     let mut client2 = t2.join().unwrap();
 
     server.stop().await.unwrap();
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    tokio::time::sleep(Duration::from_millis(75)).await;
 
     let t1 = std::thread::spawn(move || {
         let packet1 = client1.read_packet::<packets::ProtocolError>().unwrap();
