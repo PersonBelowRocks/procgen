@@ -10,11 +10,7 @@ serde = {version = "1.0.137", features = ["derive"]}
 nalgebra = {version = "0.31.0", features = ["serde-serialize"]}
 bincode = "1.3.3"
 procgen-common = {path = "../procgen-common"}
-
-[dependencies.volume]
-git = "https://github.com/PersonBelowRocks/volume.git"
-rev = "4537747856839b760aa13e1c86b95b0508988f33"
-features = ["nalgebra", "glam"]
+volume = {git = "https://github.com/PersonBelowRocks/volume.git", rev = "99ed396a86943e5107d87d2d1ed4c4b26dd99e73"}
 
 [lib]
 crate-type = ["cdylib"]

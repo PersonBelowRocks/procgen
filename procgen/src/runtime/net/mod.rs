@@ -232,6 +232,7 @@ impl Connection {
             "cannot run connection twice!"
         );
 
+        log::info!("Running connection {}", self.id());
         self.running.store(true, Ordering::SeqCst);
 
         let (read_tx, read_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
@@ -245,6 +246,8 @@ impl Connection {
         let compressor = self.compressor;
         let running = self.running.clone();
         let id = self.id();
+
+        log::info!("Starting READER for connection {}", self.id());
         tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
                 for _ in 0..100 {
@@ -263,6 +266,8 @@ impl Connection {
         let writer = self.write.clone();
         let compressor = self.compressor;
         let running = self.running.clone();
+
+        log::info!("Starting WRITER for connection {}", self.id());
         tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
                 for _ in 0..100 {
@@ -278,6 +283,8 @@ impl Connection {
     }
 
     pub async fn terminate(&self) -> anyhow::Result<()> {
+        log::info!("Terminating connection {}", self.id());
+
         let packet = ProtocolError::fatal(ProtocolErrorKind::Terminated {
             details: "Server stopped".to_string(),
         });
@@ -291,6 +298,16 @@ impl Connection {
 
         self.running.store(false, Ordering::SeqCst);
         Ok(())
+    }
+
+    pub async fn gentle_error(&self, error: ProtocolErrorKind) -> anyhow::Result<()> {
+        self.send_packet(&common::packets::ProtocolError::gentle(error))
+            .await
+    }
+
+    pub async fn fatal_error(&self, error: ProtocolErrorKind) -> anyhow::Result<()> {
+        self.send_packet(&common::packets::ProtocolError::fatal(error))
+            .await
     }
 }
 
@@ -354,16 +371,19 @@ impl Networker {
 
         tokio::spawn(async move {
             while running.load(Ordering::SeqCst) {
-                for _ in 0..100 {
-                    let (incoming, _) = listener.lock().await.accept().await.unwrap();
+                let (incoming, _) = listener.lock().await.accept().await.unwrap();
 
-                    let mut conn = Connection::new(incoming, compression);
+                let mut conn = Connection::new(incoming, compression);
+                let id = conn.id();
 
-                    log::info!("accepted connection from {}", conn.id());
+                log::info!("Accepted connection from {}", id);
 
-                    conn.run();
-                    connections.write().await.insert(conn.id(), conn);
-                }
+                conn.run();
+
+                log::info!("Adding {} to connection registry", id);
+                connections.write().await.insert(id, conn);
+
+                log::info!("Done handling connection {}", id);
             }
         });
 
@@ -371,6 +391,8 @@ impl Networker {
     }
 
     pub async fn stop(self) -> anyhow::Result<()> {
+        log::info!("Stopping networker...");
+
         self.running.store(false, Ordering::SeqCst);
 
         for conn in self.connections.read().await.values() {

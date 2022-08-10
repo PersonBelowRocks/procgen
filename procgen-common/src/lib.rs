@@ -1,12 +1,10 @@
-mod chunk;
-pub use chunk::*;
+mod volumes;
+pub use volumes::*;
 
-pub mod generation;
 pub mod packets;
-mod traits;
-pub use traits::*;
 
 extern crate downcast_rs as dc;
+extern crate hashbrown as hb;
 extern crate nalgebra as na;
 extern crate thiserror as te;
 extern crate volume as vol;
@@ -31,7 +29,7 @@ macro_rules! impl_display_debug {
 }
 
 macro_rules! impl_from_u32_id {
-    ($t:ty) => {
+    ($name:literal, $t:ty) => {
         impl From<u32> for $t {
             fn from(n: u32) -> Self {
                 Self(n)
@@ -43,17 +41,27 @@ macro_rules! impl_from_u32_id {
                 id.0
             }
         }
+
+        impl std::fmt::Display for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                <Self as std::fmt::Debug>::fmt(self, f)
+            }
+        }
+
+        impl std::fmt::Debug for $t {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}.{:x}", $name, self.0)
+            }
+        }
     };
 }
 
-type IVec2 = na::Vector2<i32>;
-type IVec3 = na::Vector3<i32>;
+type IVec3 = na::Vector3<i64>;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RequestId(pub u32);
 
-impl_display_debug!(RequestId);
-impl_from_u32_id!(RequestId);
+impl_from_u32_id!("request", RequestId);
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionId(pub SocketAddrV4);
@@ -63,10 +71,9 @@ impl_display_debug!(ConnectionId);
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GeneratorId(pub u32);
 
-impl_display_debug!(GeneratorId);
-impl_from_u32_id!(GeneratorId);
+impl_from_u32_id!("generator", GeneratorId);
 
-#[derive(Default, Debug, PartialEq, Copy, Clone, Serialize, Deserialize)]
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone, Serialize, Deserialize)]
 pub struct BlockId(pub u32);
 
 impl BlockId {
@@ -84,5 +91,24 @@ impl From<u32> for BlockId {
 impl From<BlockId> for u32 {
     fn from(val: BlockId) -> Self {
         val.0
+    }
+}
+
+#[derive(te::Error, Debug)]
+pub enum ParameterError {
+    #[error("No parameter with name {0}")]
+    DoesntExist(String),
+    #[error("Error parsing parameter with name {0}, raw data: {1}, details: {2}")]
+    ParseError(String, String, String),
+}
+
+#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Parameters {
+    pub generator_name: String, // TODO: cache hashmap or something in here
+}
+
+impl Parameters {
+    pub fn generator_name(&self) -> &str {
+        &self.generator_name
     }
 }

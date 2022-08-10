@@ -1,49 +1,153 @@
-use common::generation::{FactoryParameters, GenerationArgs};
-use common::Chunk;
+mod manager;
+pub use manager::*;
+use rayon::ThreadPool;
 
-pub trait DynGeneratorFactory: Send + Sync {
-    fn create(&self, params: FactoryParameters<'_>) -> Box<dyn DynChunkGenerator>;
+use std::error::Error;
+use std::sync::Arc;
+
+use procgen_common::packets;
+use procgen_common::Bounded;
+use procgen_common::Parameters;
+use procgen_common::Unbounded;
+use procgen_common::VoxelVolume;
+use vol::BoundingBox;
+
+#[allow(dead_code)]
+pub struct GenerationContext {
+    pool: Arc<ThreadPool>,
 }
 
-impl<T: GeneratorFactory> DynGeneratorFactory for T {
-    #[inline]
-    fn create(&self, params: FactoryParameters<'_>) -> Box<dyn DynChunkGenerator> {
-        Box::new(<T as GeneratorFactory>::create(self, params))
+pub trait BrushGenerator: DynamicBrushGenerator {
+    type Error: Error + Send + Sync + 'static;
+
+    fn generate(
+        &self,
+        vol: &mut VoxelVolume<Unbounded>,
+        pos: na::Vector3<i64>,
+        ctx: GenerationContext,
+    ) -> Result<(), Self::Error>;
+}
+
+pub trait DynamicBrushGenerator: Send {
+    fn generate(
+        &self,
+        vol: &mut VoxelVolume<Unbounded>,
+        pos: na::Vector3<i64>,
+        ctx: GenerationContext,
+    ) -> anyhow::Result<()>;
+}
+
+impl<G: BrushGenerator> DynamicBrushGenerator for G {
+    fn generate(
+        &self,
+        vol: &mut VoxelVolume<Unbounded>,
+        pos: na::Vector3<i64>,
+        ctx: GenerationContext,
+    ) -> anyhow::Result<()> {
+        <Self as BrushGenerator>::generate(self, vol, pos, ctx)?;
+        Ok(())
     }
 }
 
-pub trait GeneratorFactory: Send + Sync + 'static {
-    type Generator: ChunkGenerator;
+pub trait BrushGeneratorFactory: 'static + Send + Sync {
+    type Generator: BrushGenerator;
+    type Error: Error + Send + Sync + 'static;
 
-    fn create(&self, params: FactoryParameters<'_>) -> Self::Generator;
+    fn new_generator(&self, params: &Parameters) -> Result<Self::Generator, Self::Error>;
+    fn name(&self) -> String;
 }
 
-pub trait ChunkGenerator: Send + Sync + DynChunkGenerator {
-    /// The name of this generator. Must be unique or you'll suffer.
-    const NAME: &'static str;
-
-    type Factory: GeneratorFactory<Generator = Self> + 'static;
-
-    /// Fill the given `chunk` using the generator.
-    /// Implementors can honestly do whatever they feel like here with the chunk, this is THE terrain generation function.
-    /// Erroring as an implementor will (probably) just result in the error getting logged and the server continuing, so any error handling must be done
-    /// manually within the function.
-    fn generate(&self, args: &GenerationArgs) -> anyhow::Result<Chunk>;
-
-    fn factory() -> Self::Factory;
+pub(crate) trait DynamicBrushGeneratorFactory: 'static + Send + Sync {
+    fn new_generator(&self, params: &Parameters) -> anyhow::Result<Box<dyn DynamicBrushGenerator>>;
 }
 
-pub trait DynChunkGenerator: Send + Sync {
-    /// Fill the given `chunk` using the generator.
-    /// Implementors can honestly do whatever they feel like here with the chunk, this is THE terrain generation function.
-    /// Erroring as an implementor will (probably) just result in the error getting logged and the server continuing, so any error handling must be done
-    /// manually within the function.
-    fn generate(&self, args: &GenerationArgs) -> anyhow::Result<Chunk>;
+impl<G: BrushGeneratorFactory + 'static + Send + Sync> DynamicBrushGeneratorFactory for G {
+    fn new_generator(&self, params: &Parameters) -> anyhow::Result<Box<dyn DynamicBrushGenerator>> {
+        Ok(Box::new(<Self as BrushGeneratorFactory>::new_generator(
+            self, params,
+        )?))
+    }
 }
 
-impl<T: ChunkGenerator> DynChunkGenerator for T {
-    #[inline]
-    fn generate(&self, args: &GenerationArgs) -> anyhow::Result<Chunk> {
-        <Self as ChunkGenerator>::generate(self, args)
+pub trait RegionGenerator: DynamicRegionGenerator {
+    type Error: Error + Send + Sync + 'static;
+
+    fn generate(
+        &self,
+        vol: &mut VoxelVolume<Bounded>,
+        ctx: GenerationContext,
+    ) -> Result<(), Self::Error>;
+}
+
+pub trait DynamicRegionGenerator: Send {
+    fn generate(
+        &self,
+        vol: &mut VoxelVolume<Bounded>,
+        ctx: GenerationContext,
+    ) -> anyhow::Result<()>;
+}
+
+impl<G: RegionGenerator> DynamicRegionGenerator for G {
+    fn generate(
+        &self,
+        vol: &mut VoxelVolume<Bounded>,
+        ctx: GenerationContext,
+    ) -> anyhow::Result<()> {
+        <Self as RegionGenerator>::generate(self, vol, ctx)?;
+        Ok(())
+    }
+}
+
+pub trait RegionGeneratorFactory: 'static + Send + Sync {
+    type Generator: RegionGenerator;
+    type Error: Error + Send + Sync + 'static;
+
+    fn new_generator(&self, params: &Parameters) -> Result<Self::Generator, Self::Error>;
+    fn name(&self) -> String;
+}
+
+pub(crate) trait DynamicRegionGeneratorFactory: 'static + Send + Sync {
+    fn new_generator(&self, params: &Parameters)
+        -> anyhow::Result<Box<dyn DynamicRegionGenerator>>;
+}
+
+impl<G: RegionGeneratorFactory + 'static + Send + Sync> DynamicRegionGeneratorFactory for G {
+    fn new_generator(
+        &self,
+        params: &Parameters,
+    ) -> anyhow::Result<Box<dyn DynamicRegionGenerator>> {
+        Ok(Box::new(<Self as RegionGeneratorFactory>::new_generator(
+            self, params,
+        )?))
+    }
+}
+
+#[derive(Debug)]
+pub struct GenBrushRequest {
+    pub pos: na::Vector3<i64>,
+    pub parameters: Parameters,
+}
+
+impl From<packets::GenerateBrush> for GenBrushRequest {
+    fn from(packet: packets::GenerateBrush) -> Self {
+        GenBrushRequest {
+            pos: packet.pos,
+            parameters: packet.params,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GenRegionRequest {
+    pub region: BoundingBox,
+    pub parameters: Parameters,
+}
+
+impl From<packets::GenerateRegion> for GenRegionRequest {
+    fn from(packet: packets::GenerateRegion) -> Self {
+        GenRegionRequest {
+            region: packet.bounds.into(),
+            parameters: packet.params,
+        }
     }
 }

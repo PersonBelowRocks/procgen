@@ -1,15 +1,11 @@
 use std::{
     io::{self, Read},
-    marker::PhantomData,
     mem::size_of,
 };
 
-use crate::{
-    generation::{FactoryParameters, GenerationArgs},
-    IVec3,
-};
+use crate::{Chunk, IVec3, Parameters, Positioned};
 
-use crate::{BlockId, Chunk, GeneratorId, RequestId};
+use crate::RequestId;
 
 pub trait DowncastPacket: dc::DowncastSync + Send + std::fmt::Debug {}
 
@@ -93,88 +89,22 @@ impl AsRef<[u8]> for PacketBuffer {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenerateChunk {
-    pub request_id: RequestId,
-    pub generator_id: GeneratorId,
-    pub pos: na::Vector2<i32>,
-}
-
-impl GenerateChunk {
-    pub fn args(&self) -> GenerationArgs {
-        GenerationArgs { pos: self.pos }
-    }
-}
-
-impl Packet for GenerateChunk {
-    const ID: u16 = 0;
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ReplyChunk {
-    pub request_id: RequestId,
-    pub chunk: Chunk,
-}
-
-impl Packet for ReplyChunk {
-    const ID: u16 = 1;
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AddGenerator {
-    pub request_id: RequestId,
-    pub name: String,
-    pub min_height: i32,
-    pub max_height: i32,
-    pub default_id: BlockId,
-}
-
-impl AddGenerator {
-    pub fn factory_params(&self) -> FactoryParameters<'_> {
-        FactoryParameters {
-            min_height: self.min_height,
-            max_height: self.max_height,
-            default: self.default_id,
-
-            _future_noncopy_params: PhantomData,
-        }
-    }
-}
-
-impl Packet for AddGenerator {
-    const ID: u16 = 2;
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ConfirmGeneratorAddition {
-    pub request_id: RequestId,
-    pub generator_id: GeneratorId,
-}
-
-impl ConfirmGeneratorAddition {
-    pub fn new(request_id: RequestId, generator_id: GeneratorId) -> Self {
-        Self {
-            request_id,
-            generator_id,
-        }
-    }
-}
-
-impl Packet for ConfirmGeneratorAddition {
-    const ID: u16 = 3;
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum ProtocolErrorKind {
     Other {
         details: String,
     },
     GeneratorNotFound {
-        generator_id: GeneratorId,
+        generator_name: String,
         request_id: RequestId,
     },
-    ChunkGenerationFailure {
-        generator_id: GeneratorId,
+    GenerationError {
+        generator_name: String,
+        request_id: RequestId,
+        details: String,
+    },
+    FactoryError {
+        generator_name: String,
         request_id: RequestId,
         details: String,
     },
@@ -201,7 +131,7 @@ impl ProtocolError {
 }
 
 impl Packet for ProtocolError {
-    const ID: u16 = 4;
+    const ID: u16 = 0;
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -212,18 +142,18 @@ pub struct GenerateRegion {
 }
 
 impl Packet for GenerateRegion {
-    const ID: u16 = 5;
+    const ID: u16 = 1;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct GenerateDynamic {
+pub struct GenerateBrush {
     pub request_id: RequestId,
     pub pos: IVec3,
     pub params: Parameters,
 }
 
-impl Packet for GenerateDynamic {
-    const ID: u16 = 6;
+impl Packet for GenerateBrush {
+    const ID: u16 = 2;
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -232,28 +162,40 @@ pub struct FinishRequest {
 }
 
 impl Packet for FinishRequest {
+    const ID: u16 = 3;
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VoxelData {
+    pub request_id: RequestId,
+    pub data: Chunk<Positioned>,
+}
+
+impl Packet for VoxelData {
+    const ID: u16 = 4;
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AckRequest {
+    pub request_id: RequestId,
+    pub info: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RequestGenerators {
+    pub request_id: RequestId,
+}
+
+impl Packet for RequestGenerators {
+    const ID: u16 = 6;
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ListGenerators {
+    pub request_id: RequestId,
+    pub generators: Vec<String>,
+}
+
+impl Packet for ListGenerators {
     const ID: u16 = 7;
-}
-
-#[derive(te::Error, Debug)]
-pub enum ParameterError {
-    #[error("No parameter with name {0}")]
-    DoesntExist(String),
-    #[error("Error parsing parameter with name {0}, raw data: {1}, details: {2}")]
-    ParseError(String, String, String),
-}
-
-#[derive(Default, Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Parameters {
-    // TODO: cache hashmap or something in here
-}
-
-impl Parameters {
-    pub fn new() -> Self {
-        todo!()
-    }
-
-    pub fn get_parameter<T>(&self, name: &str) -> Result<T, ParameterError> {
-        todo!()
-    }
 }

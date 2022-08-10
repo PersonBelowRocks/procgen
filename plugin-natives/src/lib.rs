@@ -3,7 +3,7 @@ extern crate procgen_common as common;
 
 use common::packets::PacketBuffer;
 use common::Chunk;
-use common::ChunkSection;
+use common::Chunk;
 use common::CHUNK_SIZE;
 use flate2::read::ZlibDecoder;
 use flate2::read::ZlibEncoder;
@@ -157,7 +157,7 @@ pub(crate) trait FromJvmObject: Sized {
 }
 
 const CHUNK_SECTION_PATH: &str = "io/github/personbelowrocks/minecraft/testgenerator/ChunkSection";
-impl ToJvmObject for ChunkSection {
+impl ToJvmObject for Chunk {
     fn to_jvm_obj<'a>(&self, env: &JNIEnv<'a>) -> JObject<'a> {
         if !self.is_initialized() {
             let mut args = CtorArgs::new();

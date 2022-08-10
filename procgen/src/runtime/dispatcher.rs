@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{future::Future, marker::PhantomData, sync::Arc};
 
 use anymap::*;
 use tokio::sync::{broadcast as bcst, mpsc, RwLock};
@@ -15,6 +15,9 @@ impl<T: 'static + Send> SingleEvent for T {}
 pub trait DispatcherContext: Send + Sync + 'static {
     async fn broadcast_event<E: BroadcastedEvent>(&self, event: E) -> bool;
     async fn fire_event<E: SingleEvent>(&self, event: E) -> bool;
+
+    fn broadcast_event_blocking<E: BroadcastedEvent>(&self, event: E) -> bool;
+    fn fire_event_blocking<E: SingleEvent>(&self, event: E) -> bool;
 }
 
 pub struct BcstEventProvider<Ctx, E> {
@@ -85,6 +88,14 @@ impl<Ctx: DispatcherContext> BcstSenderStorage<Ctx> {
             .and_then(|tx| tx.send((Arc::new(ctx), event)).ok())
             .is_some()
     }
+
+    pub fn fire_blocking<E: BroadcastedEvent>(&self, ctx: Ctx, event: E) -> bool {
+        self.inner
+            .blocking_read()
+            .get::<bcst::Sender<Ev<Ctx, E>>>()
+            .and_then(|tx| tx.send((Arc::new(ctx), event)).ok())
+            .is_some()
+    }
 }
 
 struct SingleSenderStorage<Ctx: DispatcherContext> {
@@ -121,6 +132,14 @@ impl<Ctx: DispatcherContext> SingleSenderStorage<Ctx> {
             false
         }
     }
+
+    pub fn fire_blocking<E: SingleEvent>(&self, ctx: Ctx, event: E) -> bool {
+        if let Some(tx) = self.inner.blocking_read().get::<mpsc::Sender<Ev<Ctx, E>>>() {
+            tx.blocking_send((Arc::new(ctx), event)).is_ok()
+        } else {
+            false
+        }
+    }
 }
 
 pub struct Dispatcher<Ctx: DispatcherContext>
@@ -146,8 +165,27 @@ impl<Ctx: DispatcherContext> Dispatcher<Ctx> {
         BcstEventProvider { rx, skipped: 0 }
     }
 
+    pub async fn register_bcst<E, Fut, F>(&self, listener: F)
+    where
+        E: BroadcastedEvent,
+        Fut: Future<Output = ()> + Send,
+        F: Fn(Arc<Ctx>, E) -> Fut + Send + Sync + 'static,
+    {
+        let mut provider = self.broadcast_handler::<E>().await;
+
+        tokio::spawn(async move {
+            while let Some((ctx, ev)) = provider.next().await {
+                listener(ctx, ev).await;
+            }
+        });
+    }
+
     pub async fn broadcast_event<E: BroadcastedEvent>(&self, ctx: Ctx, event: E) -> bool {
         self.bcst_senders.fire(ctx, event).await
+    }
+
+    pub fn broadcast_event_blocking<E: BroadcastedEvent>(&self, ctx: Ctx, event: E) -> bool {
+        self.bcst_senders.fire_blocking(ctx, event)
     }
 
     pub async fn single_handler<E: SingleEvent>(&self) -> Option<SingleEventProvider<Ctx, E>> {
@@ -155,7 +193,30 @@ impl<Ctx: DispatcherContext> Dispatcher<Ctx> {
         Some(SingleEventProvider { rx })
     }
 
+    pub async fn register_single<E, Fut, F>(&self, listener: F) -> bool
+    where
+        E: SingleEvent,
+        Fut: Future<Output = ()> + Send,
+        F: Fn(Arc<Ctx>, E) -> Fut + Send + Sync + 'static,
+    {
+        if let Some(mut provider) = self.single_handler::<E>().await {
+            tokio::spawn(async move {
+                while let Some((ctx, ev)) = provider.next().await {
+                    listener(ctx, ev).await;
+                }
+            });
+
+            true
+        } else {
+            false
+        }
+    }
+
     pub async fn fire_event<E: SingleEvent>(&self, ctx: Ctx, event: E) -> bool {
         self.single_senders.fire(ctx, event).await
+    }
+
+    pub fn fire_event_blocking<E: SingleEvent>(&self, ctx: Ctx, event: E) -> bool {
+        self.single_senders.fire_blocking(ctx, event)
     }
 }
