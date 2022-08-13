@@ -418,6 +418,4 @@ async fn end_to_end_server_test() {
     assert_eq!(found_voxels, expected_voxels);
 
     server.stop().await.unwrap();
-
-    // todo!()
 }

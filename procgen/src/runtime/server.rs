@@ -124,36 +124,6 @@ impl Server {
         });
     }
 
-    /// Start the distributor thread for generated chunks. This thread collects chunks from the generator pool and
-    /// sends them to their respective clients.
-    fn start_chunk_distributor(&self) {
-        // let coarsening = self.params.coarsening;
-
-        // // We don't need this function to be async, doing so would just add needless complexity, so we access the async mutex by blocking.
-        // let receiver = tokio::task::block_in_place(|| self.generators.blocking_lock().receiver());
-        // let generators = self.generators.clone();
-        // let net = self.net.clone();
-        // let running = self.running.clone();
-        // let dispatcher = self.dispatcher.clone();
-
-        // tokio::spawn(async move {
-        //     while running.load(Ordering::SeqCst) {
-        //         for _ in 0..coarsening {
-        //             for completed in receiver.completed().await.collect::<Vec<_>>().into_iter() {
-        //                 let ctx = Context {
-        //                     dispatcher: dispatcher.clone(),
-        //                     generators: generators.clone(),
-        //                     networker: net.clone(),
-        //                 };
-        //                 let event = ChunkFinished { result: completed };
-
-        //                 dispatcher.fire_event(ctx, event).await;
-        //             }
-        //         }
-        //     }
-        // });
-    }
-
     pub async fn run(&mut self) {
         if self.running.load(Ordering::SeqCst) {
             panic!("Server is already running")
@@ -166,7 +136,5 @@ impl Server {
 
         log::info!("Starting client request handler...");
         self.start_client_request_handler();
-        log::info!("Starting chunk distributor...");
-        self.start_chunk_distributor();
     }
 }
