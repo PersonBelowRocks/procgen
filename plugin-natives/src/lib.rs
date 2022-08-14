@@ -3,8 +3,6 @@ extern crate procgen_common as common;
 
 use common::packets::PacketBuffer;
 use common::Chunk;
-use common::Chunk;
-use common::CHUNK_SIZE;
 use flate2::read::ZlibDecoder;
 use flate2::read::ZlibEncoder;
 use flate2::Compression;
@@ -111,7 +109,7 @@ struct CtorArgs<'a> {
 }
 
 #[allow(dead_code)]
-impl<'b, 'a> CtorArgs<'a> {
+impl<'a> CtorArgs<'a> {
     fn new() -> Self {
         Self { buf: Vec::new() }
     }
@@ -156,98 +154,14 @@ pub(crate) trait FromJvmObject: Sized {
     fn from_jvm_obj(env: &JNIEnv<'_>, obj: JObject<'_>) -> Option<Self>;
 }
 
-const CHUNK_SECTION_PATH: &str = "io/github/personbelowrocks/minecraft/testgenerator/ChunkSection";
-impl ToJvmObject for Chunk {
-    fn to_jvm_obj<'a>(&self, env: &JNIEnv<'a>) -> JObject<'a> {
-        if !self.is_initialized() {
-            let mut args = CtorArgs::new();
-
-            args.add(QualifiedJValue::Object(NamedJObject::new(
-                "[[[I".into(),
-                J_NULL.into(),
-            )));
-
-            return args.call(CHUNK_SECTION_PATH, env).unwrap();
-        }
-
-        let cls = env.find_class("[I").unwrap();
-
-        let pole = env.new_int_array(CHUNK_SIZE as _).unwrap();
-        let sheet = env.new_object_array(CHUNK_SIZE as _, cls, pole).unwrap();
-
-        let cubic = env
-            .new_object_array(CHUNK_SIZE as _, env.get_object_class(sheet).unwrap(), sheet)
-            .unwrap();
-        for x in 0..CHUNK_SIZE {
-            let sheet = env.new_object_array(CHUNK_SIZE as _, cls, pole).unwrap();
-
-            for y in 0..CHUNK_SIZE {
-                let pole = env.new_int_array(CHUNK_SIZE as _).unwrap();
-                let buf = (0..CHUNK_SIZE)
-                    .map(|z| self.inner_ref().unwrap()[[x, y, z]])
-                    .map(|b| i32::from_be_bytes(u32::from(b).to_be_bytes()))
-                    .collect::<Vec<i32>>();
-
-                env.set_int_array_region(pole, 0, &buf).unwrap();
-                env.set_object_array_element(sheet, y as _, pole).unwrap();
-            }
-
-            env.set_object_array_element(cubic, x as _, sheet).unwrap();
-        }
-
-        let mut args = CtorArgs::new();
-        args.add(QualifiedJValue::Object(NamedJObject::new(
-            "[[[I".into(),
-            cubic.into(),
-        )));
-
-        args.call(CHUNK_SECTION_PATH, env).unwrap()
-    }
-}
-
-const CHUNK_PATH: &str = "io/github/personbelowrocks/minecraft/testgenerator/Chunk";
-impl ToJvmObject for Chunk {
-    fn to_jvm_obj<'a>(&self, env: &JNIEnv<'a>) -> JObject<'a> {
-        let section_cls = env.find_class(CHUNK_SECTION_PATH).unwrap();
-
-        let sections = self
-            .sections()
-            .iter()
-            .map(|s| s.to_jvm_obj(env))
-            .collect::<Vec<_>>();
-
-        let jvm_sections = env
-            .new_object_array(sections.len() as _, section_cls, sections[0])
-            .unwrap();
-        sections.into_iter().enumerate().for_each(|(i, section)| {
-            env.set_object_array_element(jvm_sections, i as _, section)
-                .unwrap();
-        });
-
-        let mut args = CtorArgs::new();
-        args.add(QualifiedJValue::Object(NamedJObject::new(
-            format!("[L{};", CHUNK_SECTION_PATH),
-            jvm_sections.into(),
-        )))
-        .add(QualifiedJValue::Long(self.bounding_box().min()[0]))
-        .add(QualifiedJValue::Long(self.bounding_box().min()[1]))
-        .add(QualifiedJValue::Long(self.bounding_box().min()[2]))
-        .add(QualifiedJValue::Long(self.bounding_box().max()[0]))
-        .add(QualifiedJValue::Long(self.bounding_box().max()[1]))
-        .add(QualifiedJValue::Long(self.bounding_box().max()[2]));
-
-        args.call(CHUNK_PATH, env).unwrap()
-    }
-}
-
-impl FromJvmObject for na::Vector3<i32> {
+impl FromJvmObject for na::Vector3<i64> {
     fn from_jvm_obj(env: &JNIEnv<'_>, obj: JObject<'_>) -> Option<Self> {
         if let (JValue::Int(x), JValue::Int(y), JValue::Int(z)) = (
             env.call_method(obj, "getX", "()I", &[]).ok()?,
             env.call_method(obj, "getY", "()I", &[]).ok()?,
             env.call_method(obj, "getZ", "()I", &[]).ok()?,
         ) {
-            Some(na::vector![x, y, z])
+            Some(na::vector![x as i64, y as i64, z as i64])
         } else {
             None
         }
