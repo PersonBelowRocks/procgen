@@ -61,23 +61,19 @@ enum QualifiedJValue<'a> {
 
 impl<'a> QualifiedJValue<'a> {
     fn type_signature(&self) -> String {
-        if let QualifiedJValue::Object(obj) = self {
-            obj.sig.clone()
-        } else {
-            match self {
-                QualifiedJValue::Byte(_) => "B",
-                QualifiedJValue::Char(_) => "C",
-                QualifiedJValue::Double(_) => "D",
-                QualifiedJValue::Float(_) => "F",
-                QualifiedJValue::Int(_) => "I",
-                QualifiedJValue::Long(_) => "J",
-                QualifiedJValue::Short(_) => "S",
-                QualifiedJValue::Void => "V",
-                QualifiedJValue::Bool(_) => "Z",
-                _ => unreachable!(),
-            }
-            .into()
+        match self {
+            QualifiedJValue::Byte(_) => "B",
+            QualifiedJValue::Char(_) => "C",
+            QualifiedJValue::Double(_) => "D",
+            QualifiedJValue::Float(_) => "F",
+            QualifiedJValue::Int(_) => "I",
+            QualifiedJValue::Long(_) => "J",
+            QualifiedJValue::Short(_) => "S",
+            QualifiedJValue::Bool(_) => "Z",
+            QualifiedJValue::Object(obj) => &obj.sig,
+            QualifiedJValue::Void => "V",
         }
+        .into()
     }
 }
 
