@@ -1,4 +1,4 @@
-package io.github.personbelowrocks.minecraft.testgenerator;
+package io.github.personbelowrocks.minecraft.testgenerator
 
 import com.sk89q.worldedit.IncompleteRegionException
 import com.sk89q.worldedit.WorldEdit
@@ -10,14 +10,13 @@ import org.bukkit.command.CommandExecutor
 import org.bukkit.command.CommandSender
 import org.bukkit.entity.Player
 import org.bukkit.plugin.java.JavaPlugin
+import com.sk89q.worldedit.math.BlockVector3
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.Socket
-import java.net.SocketAddress
 import java.nio.BufferUnderflowException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.channels.SocketChannel
 
 
 val logger = Bukkit.getLogger()
@@ -51,12 +50,12 @@ class Client(private val address: String?, private val port: Int) {
         inputStream = BufferedInputStream(socket.getInputStream())
     }
 
-    fun writePacket(packet: Packet) {
+    fun writePacket(packet: UpstreamPacket) {
         outputStream!!.write(packet.toBytes().toByteArray())
         outputStream!!.flush()
     }
 
-    fun readPacket(): Packet? {
+    fun readPacket(): UpstreamPacket? {
 
         val compressedLen = try {
             ByteBuffer.wrap(inputStream!!.readNBytes(4)).order(ByteOrder.BIG_ENDIAN).int
@@ -71,11 +70,11 @@ class Client(private val address: String?, private val port: Int) {
         }
 
         val packetBuffer = inputStream!!.readNBytes(compressedLen)
-        return NativeBindings.decodePacket(packetBuffer, decompressedLen.toLong()) as? Packet
+        return NativeBindings.decodePacket(packetBuffer, decompressedLen.toLong()) as? UpstreamPacket
     }
 }
 
-class RootCommand(private val we: WorldEdit, private val client: Client): CommandExecutor {
+class RootCommand(private val we: WorldEdit, private val client: Client) : CommandExecutor {
     override fun onCommand(sender: CommandSender, command: Command, label: String, args: Array<out String>): Boolean {
         val bukkitPlayer = sender as? Player ?: run {
             sender.sendMessage("You must be a player to use this command!")
@@ -99,15 +98,6 @@ class RootCommand(private val we: WorldEdit, private val client: Client): Comman
         }
 
         sender.sendMessage("your selection is (${sel.pos1}, ${sel.pos2})")
-
-        val packet = GenerateRegion(
-            500,
-            sel.pos1,
-            sel.pos2,
-            "hello there!"
-        )
-
-        client.writePacket(packet)
 
         return true
     }

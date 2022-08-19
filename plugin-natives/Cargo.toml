@@ -11,6 +11,7 @@ nalgebra = {version = "0.31.0", features = ["serde-serialize"]}
 bincode = "1.3.3"
 procgen-common = {path = "../procgen-common"}
 volume = {git = "https://github.com/PersonBelowRocks/volume.git", rev = "99ed396a86943e5107d87d2d1ed4c4b26dd99e73"}
+thiserror = "1.0.32"
 
 [lib]
 crate-type = ["cdylib"]
