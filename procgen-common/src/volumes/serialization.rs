@@ -109,8 +109,10 @@ mod tests {
 
     #[test]
     fn parity_positioned() {
-        let mut cs = Chunk::<Positioned>::new([10, 11, 12].into());
-        assert!(cs.set([5, 5, 5].into(), 202.into()));
+        let pos = na::vector![10i64, 11, 12];
+
+        let mut cs = Chunk::<Positioned>::new(pos);
+        assert!(cs.set(na::vector![5, 5, 5] + (pos * 16), 202.into()));
 
         let bincode_cs = bincode::serialize(&cs).unwrap();
         let deser_cs = bincode::deserialize::<Chunk<Positioned>>(&bincode_cs).unwrap();
