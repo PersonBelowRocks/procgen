@@ -3,20 +3,20 @@ package io.github.personbelowrocks.minecraft.testgenerator.packets
 import io.github.personbelowrocks.minecraft.testgenerator.Chunk
 
 class VoxelData(
-    val requestId: Long,
+    override val requestId: Long,
     val chunk: Chunk
-)
+): DownstreamResponse(4, requestId)
 
 class FinishRequest(
-    val requestId: Long
-)
+    override val requestId: Long
+): DownstreamResponse(3, requestId)
 
 class AckRequest(
-    val requestId: Long,
+    override val requestId: Long,
     val info: String?
-)
+): DownstreamResponse(5, requestId)
 
 class ListGenerators(
-    val requestId: Long,
+    override val requestId: Long,
     val generators: Array<String>,
-)
+): DownstreamResponse(7, requestId)

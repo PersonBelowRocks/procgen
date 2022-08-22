@@ -181,6 +181,10 @@ pub struct AckRequest {
     pub info: Option<String>,
 }
 
+impl Packet for AckRequest {
+    const ID: u16 = 5;
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RequestGenerators {
     pub request_id: RequestId,

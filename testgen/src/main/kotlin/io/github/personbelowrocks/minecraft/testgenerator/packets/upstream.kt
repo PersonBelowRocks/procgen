@@ -1,10 +1,8 @@
 package io.github.personbelowrocks.minecraft.testgenerator.packets
 
 import com.sk89q.worldedit.math.BlockVector3
+import io.github.personbelowrocks.minecraft.testgenerator.NativeBindings
 
-interface UpstreamPacket {
-    fun toBytes(): Array<Byte>
-}
 
 class GenerateRegion(
     val requestId: Long,
@@ -14,7 +12,7 @@ class GenerateRegion(
     // TODO: currently this just represents a generator's name, but should
     //  represent more extensive parameters for a generator too
     val name: String,
-)
+): UpstreamPacket(1)
 
 class GenerateBrush(
     val requestId: Long,
@@ -22,8 +20,8 @@ class GenerateBrush(
 
     // TODO: see the same field on GenerateRegion
     val name: String
-)
+): UpstreamPacket(2)
 
 class RequestGenerators(
     val requestId: Long
-)
+): UpstreamPacket(6)
