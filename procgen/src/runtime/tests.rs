@@ -400,7 +400,8 @@ async fn end_to_end_server_test() {
         }
     }
 
-    let expected_voxels = (region_bounds.start - region_bounds.end).xz().product();
+    let bounds = received_volume.bounding_box();
+    let expected_voxels = (bounds.max() - bounds.min()).xz().product();
     let mut found_voxels = 0;
 
     let min = received_volume.bounding_box().min();

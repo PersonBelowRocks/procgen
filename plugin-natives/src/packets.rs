@@ -19,12 +19,12 @@ pub(crate) mod upstream {
             env: jni::JNIEnv<'a>,
             raw_obj: jni::objects::JObject<'a>,
         ) -> crate::ConvResult<Self> {
-            let bvec_getter_sig = format!("L{};", WORLDEDIT_BLOCK_VECTOR_3_PATH);
+            let bvec_getter_sig = format!("()L{};", WORLDEDIT_BLOCK_VECTOR_3_PATH);
 
             let obj = EnvObject::new(env, raw_obj);
 
             let request_id: RequestId =
-                (obj.jcall::<i64>("getRequestId", "()J", &[])? as u32).into();
+                (obj.jcall::<i32>("getRequestId", "()I", &[])? as u32).into();
 
             let pos1: na::Vector3<i64> = BlockVector3::from_jvm(
                 env,
@@ -66,7 +66,7 @@ pub(crate) mod upstream {
             let obj = EnvObject::new(env, raw_obj);
 
             let request_id: RequestId =
-                (obj.jcall::<i64>("getRequestId", "()J", &[])? as u32).into();
+                (obj.jcall::<i32>("getRequestId", "()I", &[])? as u32).into();
 
             let pos: na::Vector3<i64> = BlockVector3::from_jvm(
                 env,
@@ -100,7 +100,7 @@ pub(crate) mod upstream {
             let obj = EnvObject::new(env, raw_obj);
 
             let request_id: RequestId =
-                (obj.jcall::<i64>("getRequestId", "()J", &[])? as u32).into();
+                (obj.jcall::<i32>("getRequestId", "()I", &[])? as u32).into();
 
             Ok(Self { request_id })
         }
@@ -116,13 +116,13 @@ pub(crate) mod downstream {
     use super::pkt_cls_path;
 
     impl<'a> ToJvm<'a> for packets::VoxelData {
-        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<jni::objects::JObject<'a>> {
+        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<JObject<'a>> {
             let mut args = CtorArgs::new();
 
-            args.add(QualifiedJValue::Long(self.request_id.0.into()));
+            args.add(QualifiedJValue::Int(self.request_id.0 as _));
             args.add(QualifiedJValue::Object(NamedJObject::new(
                 format!("L{};", CHUNK_PATH),
-                self.data.to_jvm(env)?,
+                self.data.to_jvm(env).unwrap(),
             )));
 
             Ok(args.construct(env.find_class(pkt_cls_path("VoxelData"))?, &env)?)
@@ -130,19 +130,19 @@ pub(crate) mod downstream {
     }
 
     impl<'a> ToJvm<'a> for packets::FinishRequest {
-        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<jni::objects::JObject<'a>> {
+        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<JObject<'a>> {
             let mut args = CtorArgs::new();
 
-            args.add(QualifiedJValue::Long(self.request_id.0.into()));
+            args.add(QualifiedJValue::Int(self.request_id.0 as _));
             Ok(args.construct(env.find_class(pkt_cls_path("FinishRequest"))?, &env)?)
         }
     }
 
     impl<'a> ToJvm<'a> for packets::AckRequest {
-        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<jni::objects::JObject<'a>> {
+        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<JObject<'a>> {
             let mut args = CtorArgs::new();
 
-            args.add(QualifiedJValue::Long(self.request_id.0.into()));
+            args.add(QualifiedJValue::Int(self.request_id.0 as _));
 
             let info: JObject<'a> = match &self.info {
                 Some(string) => env.new_string(string)?.into(),
@@ -159,10 +159,10 @@ pub(crate) mod downstream {
     }
 
     impl<'a> ToJvm<'a> for packets::ListGenerators {
-        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<jni::objects::JObject<'a>> {
+        fn to_jvm(&self, env: jni::JNIEnv<'a>) -> crate::ConvResult<JObject<'a>> {
             let mut args = CtorArgs::new();
 
-            args.add(QualifiedJValue::Long(self.request_id.0.into()));
+            args.add(QualifiedJValue::Int(self.request_id.0 as _));
 
             let generator_list: JObject<'a> = {
                 let arr = env.new_object_array(

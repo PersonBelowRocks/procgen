@@ -110,8 +110,6 @@ type PRecv<P> = Prov<ReceivedPacket<P>>;
 
 async fn handle_incoming_packet(ctx: Arc<Context>, event: IncomingPacket) {
     if let Some(packet) = event.packet.downcast_ref::<packets::GenerateRegion>() {
-        println!("received GenerateRegion!");
-
         let packet = ReceivedPacket {
             connection: event.connection.clone(),
             packet: Arc::new(packet.clone()),

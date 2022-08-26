@@ -224,9 +224,8 @@ pub static WORLDEDIT_BLOCK_VECTOR_3_PATH: &str = "com/sk89q/worldedit/math/Block
 impl<'a> FromJvm<'a> for BlockVector3<'a> {
     fn from_jvm(env: JNIEnv<'a>, obj: JObject<'a>) -> ConvResult<Self> {
         let expected_class = env.find_class(WORLDEDIT_BLOCK_VECTOR_3_PATH)?;
-        let provided_class = env.get_object_class(obj)?;
 
-        if !env.is_same_object(expected_class, provided_class)? {
+        if !env.is_instance_of(obj, expected_class)? {
             Err(JvmConversionError::InvalidObject(
                 std::any::type_name::<Self>(),
             ))
@@ -246,12 +245,20 @@ impl<'a> ToJvm<'a> for BlockVector3<'a> {
 
 impl<'a> ToJvm<'a> for na::Vector3<i64> {
     fn to_jvm(&self, env: JNIEnv<'a>) -> ConvResult<JObject<'a>> {
-        let mut args = CtorArgs::new();
-        args.add(QualifiedJValue::Int(self.x as i32))
-            .add(QualifiedJValue::Int(self.y as i32))
-            .add(QualifiedJValue::Int(self.z as i32));
+        let args = [
+            JValue::Int(self.x as _),
+            JValue::Int(self.y as _),
+            JValue::Int(self.z as _),
+        ];
 
-        Ok(args.construct(env.find_class(WORLDEDIT_BLOCK_VECTOR_3_PATH)?, &env)?)
+        let class = env.find_class(WORLDEDIT_BLOCK_VECTOR_3_PATH)?;
+        let signature = format!("(III)L{};", WORLDEDIT_BLOCK_VECTOR_3_PATH);
+
+        let obj: JObject<'a> = env
+            .call_static_method(class, "at", &signature, &args)?
+            .try_into()?;
+
+        Ok(obj)
     }
 }
 
@@ -259,13 +266,24 @@ fn chunk_storage_as_jarray<'a, P: PositionStatus>(
     env: JNIEnv<'a>,
     chunk: &Chunk<P>,
 ) -> Result<JObject<'a>, jni::errors::Error> {
-    let outer = env.new_object_array(Chunk::<P>::SIZE as i32, env.find_class("[[[J")?, J_NULL)?;
+    let outer = env
+        .new_object_array(
+            Chunk::<P>::SIZE as i32,
+            env.find_class("[[J").unwrap(),
+            J_NULL,
+        )
+        .unwrap();
 
     for x in 0..Chunk::<P>::SIZE {
-        let middle =
-            env.new_object_array(Chunk::<P>::SIZE as i32, env.find_class("[[J")?, J_NULL)?;
+        let middle = env
+            .new_object_array(
+                Chunk::<P>::SIZE as i32,
+                env.find_class("[J").unwrap(),
+                J_NULL,
+            )
+            .unwrap();
         for y in 0..Chunk::<P>::SIZE {
-            let inner = env.new_long_array(Chunk::<P>::SIZE as i32)?;
+            let inner = env.new_long_array(Chunk::<P>::SIZE as i32).unwrap();
             let mut buf = [VoxelSlot::Empty; 16];
 
             for z in 0..Chunk::<P>::SIZE {
@@ -283,11 +301,13 @@ fn chunk_storage_as_jarray<'a, P: PositionStatus>(
                 })
                 .collect::<Vec<_>>();
 
-            env.set_long_array_region(inner, 0, &buf)?;
-            env.set_object_array_element(middle, y as i32, inner)?;
+            env.set_long_array_region(inner, 0, &buf).unwrap();
+            env.set_object_array_element(middle, y as i32, inner)
+                .unwrap();
         }
 
-        env.set_object_array_element(outer, x as i32, middle)?;
+        env.set_object_array_element(outer, x as i32, middle)
+            .unwrap();
     }
 
     Ok(outer.into())
@@ -297,19 +317,30 @@ pub static CHUNK_PATH: &str = "io/github/personbelowrocks/minecraft/testgenerato
 
 impl<'a> ToJvm<'a> for Chunk<Positioned> {
     fn to_jvm(&self, env: JNIEnv<'a>) -> ConvResult<JObject<'a>> {
-        let storage = chunk_storage_as_jarray(env, self)?;
+        let storage = chunk_storage_as_jarray(env, self).unwrap();
 
         let mut args = CtorArgs::new();
+        args.add(QualifiedJValue::Object(NamedJObject::new(
+            format!("L{};", WORLDEDIT_BLOCK_VECTOR_3_PATH),
+            self.bounding_box().min().to_jvm(env).unwrap(),
+        )));
         args.add(QualifiedJValue::Object(NamedJObject::new(
             "[[[J".into(),
             storage,
         )));
-        args.add(QualifiedJValue::Object(NamedJObject::new(
-            format!("L{};", WORLDEDIT_BLOCK_VECTOR_3_PATH),
-            self.bounding_box().min().to_jvm(env)?,
-        )));
 
-        Ok(args.construct(env.find_class(CHUNK_PATH)?, &env)?)
+        let obj = match args.construct(env.find_class(CHUNK_PATH)?, &env) {
+            Ok(obj) => obj,
+            Err(error) => match error {
+                jni::errors::Error::JavaException => {
+                    env.exception_describe().unwrap();
+                    panic!("TERMINATED DUE TO JavaException");
+                }
+                _ => panic!("{:?}", error),
+            },
+        };
+
+        Ok(args.construct(env.find_class(CHUNK_PATH)?, &env).unwrap())
     }
 }
 
@@ -319,12 +350,12 @@ impl<'a> ToJvm<'a> for Chunk<Unpositioned> {
 
         let mut args = CtorArgs::new();
         args.add(QualifiedJValue::Object(NamedJObject::new(
-            "[[[J".into(),
-            storage,
-        )));
-        args.add(QualifiedJValue::Object(NamedJObject::new(
             format!("L{};", WORLDEDIT_BLOCK_VECTOR_3_PATH),
             J_NULL.into(),
+        )));
+        args.add(QualifiedJValue::Object(NamedJObject::new(
+            "[[[J".into(),
+            storage,
         )));
 
         Ok(args.construct(env.find_class(CHUNK_PATH)?, &env)?)

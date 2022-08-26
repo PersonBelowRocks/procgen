@@ -61,11 +61,39 @@ impl Default for VoxelVolume<Unbounded> {
 
 impl VoxelVolume<Bounded> {
     pub fn new(bounds: BoundingBox) -> Self {
+        let bounds: BoundingBox = {
+            let min = bounds.min();
+            let max = bounds.max(); // + na::vector![1, 1, 1];
+            (min..max).into()
+        };
+
         Self {
             bounded: Bounded(bounds),
             sections: Default::default(),
         }
     }
+}
+
+fn to_section_pos(idx: IVec3) -> IVec3 {
+    let size = Chunk::<Positioned>::SIZE;
+
+    [
+        idx.x.div_euclid(size),
+        idx.y.div_euclid(size),
+        idx.z.div_euclid(size),
+    ]
+    .into()
+}
+
+fn to_voxel_pos(idx: IVec3) -> IVec3 {
+    let size = Chunk::<Positioned>::SIZE;
+
+    [
+        idx.x.rem_euclid(size),
+        idx.y.rem_euclid(size),
+        idx.z.rem_euclid(size),
+    ]
+    .into()
 }
 
 impl Volume for VoxelVolume<Unbounded> {
@@ -76,10 +104,8 @@ impl Volume for VoxelVolume<Unbounded> {
     fn set(&mut self, idx: Idx, item: Self::Input) -> bool {
         use hb::hash_map::Entry;
 
-        let size = Chunk::<Unpositioned>::SIZE;
-
-        let section_pos = idx / size;
-        let voxel_pos: IVec3 = [idx.x % size, idx.y % size, idx.z % size].into();
+        let section_pos = to_section_pos(idx);
+        let voxel_pos = to_voxel_pos(idx);
 
         match self.sections.entry(section_pos) {
             Entry::Occupied(mut entry) => entry.get_mut().set(voxel_pos, item),
@@ -91,10 +117,8 @@ impl Volume for VoxelVolume<Unbounded> {
 
     #[inline]
     fn get(&self, idx: Idx) -> Self::Output {
-        let size = Chunk::<Unpositioned>::SIZE;
-
-        let section_pos = idx / size;
-        let voxel_pos: IVec3 = [idx.x % size, idx.y % size, idx.z % size].into();
+        let section_pos = to_section_pos(idx);
+        let voxel_pos = to_voxel_pos(idx);
 
         self.sections
             .get(&section_pos)
@@ -116,14 +140,12 @@ impl Volume for VoxelVolume<Bounded> {
     fn set(&mut self, idx: Idx, item: Self::Input) -> bool {
         use hb::hash_map::Entry;
 
-        if !self.bounded.0.contains(idx) {
+        if !self.bounding_box().contains(idx) {
             return false;
         }
 
-        let size = Chunk::<Unpositioned>::SIZE;
-
-        let section_pos = idx / size;
-        let voxel_pos: IVec3 = [idx.x % size, idx.y % size, idx.z % size].into();
+        let section_pos = to_section_pos(idx);
+        let voxel_pos = to_voxel_pos(idx);
 
         match self.sections.entry(section_pos) {
             Entry::Occupied(mut entry) => entry.get_mut().set(voxel_pos, item),
@@ -135,14 +157,12 @@ impl Volume for VoxelVolume<Bounded> {
 
     #[inline]
     fn get(&self, idx: Idx) -> Self::Output {
-        if !self.bounded.0.contains(idx) {
+        if !self.bounding_box().contains(idx) {
             return VoxelSlot::OutOfBounds;
         }
 
-        let size = Chunk::<Unpositioned>::SIZE;
-
-        let section_pos = idx / size;
-        let voxel_pos: IVec3 = [idx.x % size, idx.y % size, idx.z % size].into();
+        let section_pos = to_section_pos(idx);
+        let voxel_pos = to_voxel_pos(idx);
 
         match self.sections.get(&section_pos) {
             Some(section) => section.get(voxel_pos),
@@ -152,6 +172,62 @@ impl Volume for VoxelVolume<Bounded> {
 
     #[inline]
     fn bounding_box(&self) -> BoundingBox {
-        self.bounded.0
+        let min = self.bounded.0.min();
+        let max = self.bounded.0.max() + na::vector![1, 1, 1];
+
+        (min..max).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use volume::BoundingBox;
+    use volume::Volume;
+
+    use crate::Bounded;
+    use crate::VoxelVolume;
+
+    #[test]
+    fn bounded_voxel_volume() {
+        let bounds: BoundingBox = (na::vector![-560, 136, 209]..na::vector![-619, 153, 169]).into();
+        let mut volume = VoxelVolume::<Bounded>::new(bounds);
+
+        let min = bounds.min();
+        let max = bounds.max();
+
+        for x in min.x..max.x {
+            for y in min.y..max.y {
+                for z in min.z..max.z {
+                    let pos = na::vector![x, y, z];
+                    assert!(volume.set(pos, 1.into()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bounded_voxel_volume_single_chunk() {
+        let bounds: BoundingBox = (na::vector![-561, 66, 112]..na::vector![-576, 79, 127]).into();
+        let mut volume = VoxelVolume::<Bounded>::new(bounds);
+
+        let min = bounds.min();
+        let max = bounds.max();
+
+        for x in min.x..max.x {
+            for y in min.y..max.y {
+                for z in min.z..max.z {
+                    let pos = na::vector![x, y, z];
+                    assert!(volume.set(pos, 1.into()));
+                }
+            }
+        }
+
+        let chunks = volume.into_chunks().collect::<Vec<_>>();
+
+        for chunk in chunks.iter() {
+            dbg!(chunk);
+        }
+
+        assert_eq!(chunks.len(), 1);
     }
 }

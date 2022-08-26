@@ -88,8 +88,6 @@ impl Server {
                 // Coarsen the atomic access so the loop can be faster.
                 for _ in 0..coarsening {
                     for (conn, packet) in net.incoming().await {
-                        println!("received packet from {}", conn.id());
-
                         match packet {
                             Ok(packet) => {
                                 let event = IncomingPacket {

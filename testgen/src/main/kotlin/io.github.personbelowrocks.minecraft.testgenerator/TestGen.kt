@@ -4,6 +4,7 @@ import com.sk89q.worldedit.EditSession
 import com.sk89q.worldedit.IncompleteRegionException
 import com.sk89q.worldedit.WorldEdit
 import com.sk89q.worldedit.bukkit.BukkitAdapter
+import com.sk89q.worldedit.extension.input.ParserContext
 import com.sk89q.worldedit.math.BlockVector3
 import com.sk89q.worldedit.regions.CuboidRegion
 import com.sk89q.worldedit.world.block.BlockTypes
@@ -18,6 +19,7 @@ import org.bukkit.scheduler.BukkitRunnable
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.net.Socket
+import java.net.SocketException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.*
@@ -25,19 +27,23 @@ import java.util.concurrent.ArrayBlockingQueue
 
 val logger = Bukkit.getLogger()
 
-
-
 class Main : JavaPlugin() {
     private var client: Client? = null
 
     override fun onEnable() {
         logger.info("Starting...")
 
+        val instance = WorldEdit.getInstance()
+
+        val ctx = ParserContext()
+        ctx.actor = BukkitAdapter.adapt(this.server.consoleSender)
+        val block = instance.blockFactory.parseFromInput("stone_slab[type=top]", ctx)
+        logger.info("Block: $block")
+
         logger.info("Starting client...")
         client = Client(Connection("127.0.0.1", 4432))
         client?.run(this)
 
-        val instance = WorldEdit.getInstance()
         this.server.getPluginCommand("/pbrgen")!!.setExecutor(RootCommand(instance, client!!))
     }
 
@@ -46,6 +52,8 @@ class Main : JavaPlugin() {
         logger.info("Stopping...")
     }
 }
+
+class StopWorker: Throwable()
 
 abstract class IoWorker: Runnable {
     private var running = true
@@ -56,22 +64,36 @@ abstract class IoWorker: Runnable {
 
     override fun run() {
         while (this.running) {
-            tick()
+            try {
+                tick()
+            } catch (e: StopWorker) {
+                this.running = false
+            }
         }
     }
 
+    @Throws(StopWorker::class)
     abstract fun tick()
 }
 
 class InnerReader(private val queue: Queue<DownstreamPacket>, private val stream: BufferedInputStream): IoWorker() {
     override fun tick() {
-        val packetSize = ByteBuffer.wrap(stream.readNBytes(4)).order(ByteOrder.BIG_ENDIAN).int
-        val sizeHint = ByteBuffer.wrap(stream.readNBytes(4)).order(ByteOrder.BIG_ENDIAN).int
+        try {
 
-        val packetBuffer = stream.readNBytes(packetSize)
+            val packetSize = ByteBuffer.wrap(stream.readNBytes(4)).order(ByteOrder.BIG_ENDIAN).int
+            val sizeHint = ByteBuffer.wrap(stream.readNBytes(4)).order(ByteOrder.BIG_ENDIAN).int
 
-        val packet = DownstreamPacket.decode(packetBuffer, sizeHint.toLong())
-        queue.add(packet)
+
+            val packetBuffer = stream.readNBytes(packetSize)
+
+            val packet = DownstreamPacket.decode(packetBuffer, sizeHint.toLong())
+
+            queue.add(packet)
+
+        } catch (e: SocketException) {
+            logger.info("Reader was disconnected from the server.")
+            throw StopWorker()
+        }
     }
 }
 
@@ -101,8 +123,14 @@ class InnerWriter(private val queue: Queue<UpstreamPacket>, private val stream: 
         }
 
         val buf = packet.toBytes()
-        stream.write(buf)
-        stream.flush()
+
+        try {
+            stream.write(buf)
+            stream.flush()
+        } catch (e: SocketException) {
+            logger.info("Writer was disconnected from the server.")
+            throw StopWorker()
+        }
     }
 }
 
@@ -125,11 +153,13 @@ class Writer(private val queue: Queue<UpstreamPacket>, stream: BufferedOutputStr
 }
 
 class Connection(address: String?, port: Int) {
+    private val socket: Socket
+
     private val reader: Reader
     private val writer: Writer
 
     init {
-        val socket = Socket(address, port)
+        socket = Socket(address, port)
 
         val inputStream = BufferedInputStream(socket.getInputStream())
         val readerQueue = ArrayBlockingQueue<DownstreamPacket>(32)
@@ -151,6 +181,8 @@ class Connection(address: String?, port: Int) {
     }
 
     fun stop() {
+        socket.close()
+
         synchronized(reader) {
             reader.stop()
         }
@@ -165,13 +197,12 @@ interface FeedableRequest {
     fun finish()
 }
 interface TransmittableRequest: FeedableRequest {
-    fun packet(requestId: Long): UpstreamPacket
+    fun packet(requestId: Int): UpstreamPacket
 }
 
 class RegionRequest(private val region: CuboidRegion, private val session: EditSession, private val name: String): TransmittableRequest {
-    // val extent: Extent
 
-    override fun packet(requestId: Long): UpstreamPacket {
+    override fun packet(requestId: Int): UpstreamPacket {
         return GenerateRegion(
             requestId,
             region.pos1,
@@ -181,29 +212,32 @@ class RegionRequest(private val region: CuboidRegion, private val session: EditS
     }
 
     override fun feed(chunk: Chunk) {
-        for (x in chunk.min.x until chunk.max.x) {
-            for (y in chunk.min.y until chunk.max.y) {
-                for (z in chunk.min.z until chunk.max.z) {
-                    val pos = BlockVector3.at(x, y, z).add(region.minimumPoint)
+        logger.info("Request at region $region was fed chunk [${chunk.min}..${chunk.max}]")
 
-                    val type = when (chunk.storage[x][y][z]) {
-                        0L -> BlockTypes.AIR
-                        1L -> BlockTypes.STONE
-                        else -> BlockTypes.RED_STAINED_GLASS
+        for (x in 0 until 16) {
+            for (y in 0 until 16) {
+                for (z in 0 until 16) {
+                    val pos = BlockVector3.at(x, y, z).add(chunk.min)
+
+                    val block = when (chunk.storage[x][y][z]) {
+                        0L -> BlockTypes.AIR!!.defaultState
+                        1L -> BlockTypes.STONE!!.defaultState
+                        Long.MAX_VALUE -> session.getBlock(pos)
+                        else -> BlockTypes.RED_STAINED_GLASS!!.defaultState
                     }!!
-
-                    session.setBlock(pos, type.defaultState)
+                    session.setBlock(pos, block)
                 }
             }
         }
     }
 
     override fun finish() {
+        logger.info("Request at region $region was finished")
         session.close()
     }
 }
 
-private class ClientLoop(private val connection: Connection, private val requests: MutableMap<Long, FeedableRequest>): BukkitRunnable() {
+private class ClientLoop(private val connection: Connection, private val requests: MutableMap<Int, FeedableRequest>): BukkitRunnable() {
     override fun run() {
         val receivedPackets = mutableListOf<DownstreamPacket>()
 
@@ -212,9 +246,26 @@ private class ClientLoop(private val connection: Connection, private val request
 
         // TODO: we should try to spread feeding across several ticks instead of flooding a single tick
         for (packet in receivedPackets.map {it as DownstreamResponse}) {
+            logger.info("Received response: $packet")
+
             when (packet) {
-                is VoxelData -> requests[packet.requestId]?.feed(packet.chunk)
-                is FinishRequest -> requests.remove(packet.requestId)?.finish()
+                is VoxelData -> {
+                    logger.info("Received VoxelData")
+                    val request = requests[packet.requestId]
+
+                    if (request == null) logger.info("Request was null")
+
+                    request?.feed(packet.chunk)
+                }
+
+                is FinishRequest -> {
+                    logger.info("Received FinishRequest")
+                    val request = requests[packet.requestId]
+
+                    if (request == null) logger.info("Request was null")
+
+                    request?.finish()
+                }
                 else -> TODO()
             }
         }
@@ -222,14 +273,14 @@ private class ClientLoop(private val connection: Connection, private val request
 }
 
 class Client(private val connection: Connection) {
-    private val activeVoxelRequests = mutableMapOf<Long, FeedableRequest>()
+    private val activeVoxelRequests = mutableMapOf<Int, FeedableRequest>()
 
     private var loop: ClientLoop? = null
 
-    private fun randomRequestId(): Long {
-        var requestId: Long
+    private fun randomRequestId(): Int {
+        var requestId: Int
         do {
-            requestId = Random().nextLong()
+            requestId = Random().nextInt()
         } while (activeVoxelRequests.containsKey(requestId))
 
         return requestId
@@ -237,15 +288,15 @@ class Client(private val connection: Connection) {
 
     fun newRequest(request: TransmittableRequest) {
         val requestId = randomRequestId()
-        connection.writePacket(request.packet(requestId))
         activeVoxelRequests[requestId] = request
+        connection.writePacket(request.packet(requestId))
     }
 
-    fun feed(requestId: Long, chunk: Chunk) {
+    fun feed(requestId: Int, chunk: Chunk) {
         activeVoxelRequests[requestId]!!.feed(chunk)
     }
 
-    fun finish(requestId: Long) {
+    fun finish(requestId: Int) {
         activeVoxelRequests[requestId]!!.finish()
     }
 
@@ -284,6 +335,10 @@ class RootCommand(private val we: WorldEdit, private val client: Client) : Comma
         }
 
         sender.sendMessage("your selection is (${sel.pos1}, ${sel.pos2})")
+
+        val buf = args.joinToString("")
+        sender.sendMessage(buf)
+
         val edit = we.newEditSession(player)
         val request = RegionRequest(
             sel,

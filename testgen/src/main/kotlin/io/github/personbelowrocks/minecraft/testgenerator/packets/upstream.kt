@@ -5,7 +5,7 @@ import io.github.personbelowrocks.minecraft.testgenerator.NativeBindings
 
 
 class GenerateRegion(
-    val requestId: Long,
+    val requestId: Int,
     val pos1: BlockVector3,
     val pos2: BlockVector3,
 
@@ -15,7 +15,7 @@ class GenerateRegion(
 ): UpstreamPacket(1)
 
 class GenerateBrush(
-    val requestId: Long,
+    val requestId: Int,
     val pos: BlockVector3,
 
     // TODO: see the same field on GenerateRegion
@@ -23,5 +23,5 @@ class GenerateBrush(
 ): UpstreamPacket(2)
 
 class RequestGenerators(
-    val requestId: Long
+    val requestId: Int
 ): UpstreamPacket(6)

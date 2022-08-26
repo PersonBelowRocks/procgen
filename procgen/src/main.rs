@@ -32,9 +32,20 @@ impl RegionGenerator for DemoGenerator {
         let min = vol.bounding_box().min();
         let max = vol.bounding_box().max();
 
+        let mut logged = false;
+
+        let offset = (max.y - min.y) / 2;
+
         for x in min.x..max.x {
-            for z in min.z..max.z {
-                vol.set([x, min.y, z].into(), 100.into());
+            for y in min.y..(max.y - offset) {
+                for z in min.z..max.z {
+                    let pos = na::vector![x, y, z];
+
+                    if !vol.set(pos, 1.into()) && !logged {
+                        logged = true;
+                        log::error!("Failed to set {pos:?}")
+                    }
+                }
             }
         }
 

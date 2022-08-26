@@ -154,21 +154,31 @@ impl Compressor {
 }
 
 pub struct ConnectionIncoming<'a> {
-    guard: MutexGuard<'a, Receiver<PacketBuffer>>,
+    guard: MutexGuard<'a, Receiver<Receive>>,
 }
 
 impl<'a> Iterator for ConnectionIncoming<'a> {
-    type Item = PacketBuffer;
+    type Item = Receive;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.guard.try_recv().ok()
     }
 }
 
+#[derive(Debug)]
+pub enum Receive {
+    Packet(PacketBuffer),
+    Disconnect,
+}
+
+#[derive(te::Error, Debug)]
+#[error("This connection is disconnected and is not running")]
+pub struct Disconnected;
+
 #[derive(Clone)]
 pub struct Connection {
     read: Arc<Mutex<BufReader<OwnedReadHalf>>>,
-    read_rx: Option<Arc<Mutex<Receiver<PacketBuffer>>>>,
+    read_rx: Option<Arc<Mutex<Receiver<Receive>>>>,
 
     write: Arc<Mutex<BufWriter<OwnedWriteHalf>>>,
     write_tx: Option<Arc<Mutex<Sender<PacketBuffer>>>>,
@@ -207,6 +217,10 @@ impl Connection {
     }
 
     pub async fn send_packet<P: Packet>(&self, packet: &P) -> anyhow::Result<()> {
+        if !self.running() {
+            return Err(Disconnected.into());
+        }
+
         let raw = packet.to_bincode()?;
 
         self.write_tx
@@ -220,10 +234,18 @@ impl Connection {
         Ok(())
     }
 
-    pub async fn incoming(&self) -> ConnectionIncoming<'_> {
-        ConnectionIncoming {
-            guard: self.read_rx.as_ref().unwrap().lock().await,
+    pub async fn incoming(&self) -> Result<ConnectionIncoming<'_>, Disconnected> {
+        if self.running() {
+            Ok(ConnectionIncoming {
+                guard: self.read_rx.as_ref().unwrap().lock().await,
+            })
+        } else {
+            Err(Disconnected)
         }
+    }
+
+    pub fn running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
     }
 
     pub fn run(&mut self) {
@@ -235,7 +257,7 @@ impl Connection {
         log::info!("Running connection {}", self.id());
         self.running.store(true, Ordering::SeqCst);
 
-        let (read_tx, read_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
+        let (read_tx, read_rx) = tokio::sync::mpsc::channel::<Receive>(128);
         let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
 
         self.read_rx = Some(Arc::new(Mutex::new(read_rx)));
@@ -253,9 +275,11 @@ impl Connection {
                 for _ in 0..100 {
                     let mut guard = reader.lock().await;
                     match compressor.read(guard.deref_mut()).await {
-                        Ok(raw) => read_tx.send(raw).await.unwrap(),
+                        Ok(raw) => read_tx.send(Receive::Packet(raw)).await.unwrap(),
                         Err(error) => {
-                            log::warn!("error reading packet from {id}: {error}")
+                            log::warn!("error reading packet from {id}: {error}");
+                            read_tx.send(Receive::Disconnect).await.unwrap();
+                            return;
                         }
                     }
                 }
@@ -272,10 +296,13 @@ impl Connection {
             while running.load(Ordering::SeqCst) {
                 for _ in 0..100 {
                     if let Ok(raw) = write_rx.try_recv() {
-                        compressor
+                        if compressor
                             .write(&raw, writer.lock().await.deref_mut())
                             .await
-                            .unwrap();
+                            .is_err()
+                        {
+                            return;
+                        }
                     }
                 }
             }
@@ -336,6 +363,8 @@ impl From<ServerParams> for Params {
     }
 }
 
+// FIXME: The networker is currently just an awkward middle layer that does nothing useful other than add overhead.
+//  Work on removing it entirely and move all the functionality in it to Connections themselves.
 #[derive(Clone)]
 pub struct Networker {
     params: Params,
@@ -407,13 +436,30 @@ impl Networker {
     pub async fn incoming(&self) -> Incoming {
         let guard = self.connections.read().await;
         let mut packets = Vec::new();
+        let mut disconnected = Vec::new();
 
-        for (_, conn) in guard.iter() {
-            packets.extend(
-                conn.incoming()
-                    .await
-                    .map(|p| (conn.clone(), packets::parse_dyn(&p))),
-            );
+        for (id, conn) in guard.iter() {
+            if let Ok(incoming) = conn.incoming().await {
+                for packet in incoming {
+                    match packet {
+                        Receive::Packet(buf) => {
+                            packets.push((conn.clone(), packets::parse_dyn(&buf)))
+                        }
+                        Receive::Disconnect => disconnected.push(*id),
+                    }
+                }
+            }
+        }
+
+        if !disconnected.is_empty() {
+            log::info!("Removing disconnected connections from registry...");
+
+            drop(guard);
+            let mut guard = self.connections.write().await;
+            for id in disconnected {
+                guard.remove(&id);
+                log::info!("Removed connection {id} from registry.")
+            }
         }
 
         Incoming(packets.into_iter())

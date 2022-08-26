@@ -19,4 +19,4 @@ abstract class DownstreamPacket(id: Short): Packet(id) {
     }
 }
 
-abstract class DownstreamResponse(id: Short, open val requestId: Long): DownstreamPacket(id)
+abstract class DownstreamResponse(id: Short, open val requestId: Int): DownstreamPacket(id)
