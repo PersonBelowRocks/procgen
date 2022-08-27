@@ -7,15 +7,14 @@ use std::{
 };
 
 use flate2::Compression;
-use procgen_common::packets;
 use tokio::sync::Mutex;
 
 use crate::generation::{BrushGeneratorFactory, GeneratorManager, RegionGeneratorFactory};
 
 use super::{
     dispatcher::Dispatcher,
-    events::{self, Context, IncomingPacket},
-    net::Networker,
+    events::{self, Context},
+    net::{Connection, ConnectionRegistry, Listener},
 };
 
 #[derive(Copy, Clone)]
@@ -26,7 +25,9 @@ pub struct ServerParams {
 }
 
 pub struct Server {
-    net: Networker,
+    registry: Arc<ConnectionRegistry>,
+    listener: Arc<Listener>,
+
     generators: Arc<Mutex<GeneratorManager>>,
     params: ServerParams,
     running: Arc<AtomicBool>,
@@ -35,17 +36,19 @@ pub struct Server {
 
 impl Server {
     pub async fn new(params: ServerParams) -> Self {
-        let dispatcher = Dispatcher::new(20);
+        let dispatcher = Arc::new(Dispatcher::new(20));
         let manager = GeneratorManager::new();
 
-        events::defaults(&dispatcher, &manager).await;
+        events::defaults(dispatcher.as_ref(), &manager).await;
 
         Self {
-            net: Networker::new(params.into()),
+            registry: Arc::new(ConnectionRegistry::new()),
+            listener: Arc::new(Listener::new(dispatcher.clone())),
+
             generators: Mutex::new(manager).into(),
             params,
             running: Arc::new(AtomicBool::from(false)),
-            dispatcher: Arc::new(dispatcher),
+            dispatcher,
         }
     }
 
@@ -53,7 +56,10 @@ impl Server {
         log::info!("Stopping server...");
 
         self.running.store(false, Ordering::SeqCst);
-        self.net.stop().await
+        self.listener.stop();
+        self.registry.disconnect_all().await?;
+
+        Ok(())
     }
 
     pub async fn add_region_generator<Fact: RegionGeneratorFactory>(&self, factory: Fact) {
@@ -72,50 +78,44 @@ impl Server {
             .await;
     }
 
-    /// Start the client request handler thread. This thread handles requests from clients such as
-    /// submitting chunks for generation and registering new chunk generators with provided parameters.
-    fn start_client_request_handler(&self) {
-        let coarsening = self.params.coarsening;
+    fn start_listener(&self) {
+        let listener = self.listener.clone();
 
-        let running = self.running.clone();
-        let net = self.net.clone();
-        let manager = self.generators.clone();
+        let address = self.params.addr;
+        let compression = self.params.compression;
+
+        let connections = self.registry.clone();
         let dispatcher = self.dispatcher.clone();
 
-        // This thread submits chunks for generation and registers generators at the request of clients.
-        tokio::spawn(async move {
-            while running.load(Ordering::SeqCst) {
-                // Coarsen the atomic access so the loop can be faster.
-                for _ in 0..coarsening {
-                    for (conn, packet) in net.incoming().await {
-                        match packet {
-                            Ok(packet) => {
-                                let event = IncomingPacket {
-                                    connection: conn,
-                                    packet: packet.into(),
-                                };
+        let context = Context {
+            dispatcher: dispatcher.clone(),
+            generators: self.generators.clone(),
+            connections: connections.clone(),
+        };
 
-                                dispatcher
-                                    .broadcast_event(
-                                        Context {
-                                            dispatcher: dispatcher.clone(),
-                                            generators: manager.clone(),
-                                            networker: net.clone(),
-                                        },
-                                        event,
-                                    )
-                                    .await;
-                            }
-                            Err(error) => {
-                                conn.send_packet(&packets::ProtocolError::fatal(
-                                    packets::ProtocolErrorKind::Other {
-                                        details: error.to_string(),
-                                    },
-                                ))
-                                .await
-                                .unwrap();
-                            }
-                        }
+        tokio::spawn(async move {
+            if let Err(error) = listener.start(address).await {
+                log::error!("Unable to connect to address {address}: {error}");
+                return;
+            }
+
+            while listener.running() {
+                match listener.accept().await {
+                    Ok((stream, address)) => {
+                        log::info!("Accepted connection from {address}");
+                        let connection = Connection::start(
+                            stream,
+                            compression,
+                            dispatcher.clone(),
+                            context.clone(),
+                        );
+                        connections.add_connection(connection).await;
+                    }
+                    Err(error) => {
+                        log::error!(
+                            "Error accepting incoming connection: {error}, stopping listener..."
+                        );
+                        listener.stop();
                     }
                 }
             }
@@ -129,10 +129,7 @@ impl Server {
 
         self.running.store(true, Ordering::SeqCst);
 
-        log::info!("Starting internal networker...");
-        self.net.run().await.unwrap();
-
-        log::info!("Starting client request handler...");
-        self.start_client_request_handler();
+        log::info!("Starting listener...");
+        self.start_listener();
     }
 }

@@ -11,7 +11,7 @@ use crate::generation::{GenBrushRequest, GenRegionRequest, GeneratorManager};
 
 use super::{
     dispatcher::{self, BcstEventProvider, Dispatcher, DispatcherContext},
-    net::{Connection, Networker},
+    net::{Connection, ConnectionRegistry},
 };
 
 pub async fn defaults(dispatcher: &Dispatcher<Context>, generator_manager: &GeneratorManager) {
@@ -43,7 +43,7 @@ pub async fn defaults(dispatcher: &Dispatcher<Context>, generator_manager: &Gene
 pub struct Context {
     pub dispatcher: Arc<Dispatcher<Self>>,
     pub generators: Arc<Mutex<GeneratorManager>>,
-    pub networker: Networker,
+    pub connections: Arc<ConnectionRegistry>,
 }
 
 #[async_trait::async_trait]
@@ -74,8 +74,8 @@ pub struct IncomingPacket {
 
 #[derive(Clone)]
 pub struct ReceivedPacket<P: Packet> {
-    connection: Connection,
-    packet: Arc<P>,
+    pub connection: Connection,
+    pub packet: Arc<P>,
 }
 
 pub struct GenerateRegionEvent {

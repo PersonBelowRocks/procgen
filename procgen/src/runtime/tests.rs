@@ -6,7 +6,7 @@ use std::{
 };
 
 use flate2::{read::ZlibDecoder, write::ZlibEncoder, Compression};
-use procgen_common::{Bounded, Chunk, Parameters, Positioned, VoxelSlot, VoxelVolume};
+use procgen_common::{Bounded, Parameters, VoxelSlot, VoxelVolume};
 use volume::Volume;
 
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
     runtime::server::{Server, ServerParams},
 };
 
-use super::net::{Header, Networker, Params};
+use super::net::Header;
 
 use common::packets::{self, *};
 
@@ -129,105 +129,6 @@ mod mock {
             parse_dyn(&decompressed_buf)
         }
     }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-async fn networker_recv() {
-    let params = Params {
-        addr: "0.0.0.0:33445".parse().unwrap(),
-        compression: Compression::best(),
-    };
-
-    let mut networker = Networker::new(params);
-
-    networker.run().await.unwrap();
-
-    let mut client = mock::MockClient::new("127.0.0.1:33445".parse::<SocketAddrV4>().unwrap());
-
-    let packet = packets::GenerateBrush {
-        request_id: 42.into(),
-        pos: [10, 11, 12].into(),
-        params: Parameters {
-            generator_name: "example".into(),
-        },
-    };
-
-    client.send_packet(&packet).unwrap();
-
-    // we need to sleep a lil so the packet has time to arrive
-    tokio::time::sleep(Duration::from_millis(75)).await;
-
-    for incoming in networker.incoming().await {
-        let packet = incoming
-            .1
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<packets::GenerateBrush>()
-            .unwrap();
-
-        assert_eq!(packet.request_id, 42.into());
-        assert_eq!(packet.pos, na::vector![10, 11, 12i64]);
-        assert_eq!(packet.params.generator_name(), "example");
-    }
-
-    networker.stop().await.unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn networker_send() {
-    let params = Params {
-        addr: "0.0.0.0:33446".parse().unwrap(),
-        compression: Compression::best(),
-    };
-
-    let mut networker = Networker::new(params);
-    networker.run().await.unwrap();
-
-    let mut client = mock::MockClient::new("127.0.0.1:33446".parse::<SocketAddrV4>().unwrap());
-
-    let generate_chunk_packet = GenerateRegion {
-        request_id: 560.into(),
-        bounds: na::vector![2, 2, 2]..na::vector![10, 10, 10],
-        params: Parameters {
-            generator_name: "example_region".into(),
-        },
-    };
-
-    client.send_packet(&generate_chunk_packet).unwrap();
-
-    // we need to box this fella otherwise we overflow the stack
-    let mut vol = Chunk::<Positioned>::new([10, 11, 12].into());
-
-    vol.set([9, 7, 5].into(), 493.into());
-
-    tokio::time::sleep(Duration::from_millis(75)).await;
-
-    for (conn, raw_packet) in networker.incoming().await {
-        let packet = raw_packet
-            .as_ref()
-            .unwrap()
-            .downcast_ref::<GenerateRegion>()
-            .unwrap();
-
-        let data_packet = VoxelData {
-            request_id: packet.request_id,
-            data: vol.clone(),
-        };
-
-        conn.send_packet(&data_packet).await.unwrap();
-    }
-
-    tokio::time::sleep(Duration::from_millis(50)).await;
-
-    let received_packet = client.read_packet::<VoxelData>().unwrap();
-
-    assert_eq!(received_packet.request_id, 560.into());
-    assert_eq!(
-        received_packet.data.get([9, 10, 5].into()),
-        vol.get([9, 10, 5].into())
-    );
-
-    networker.stop().await.unwrap();
 }
 
 // TODO: more dispatcher tests!

@@ -25,7 +25,10 @@ use tokio::{
     },
 };
 
-use super::server::ServerParams;
+use super::{
+    dispatcher::Dispatcher,
+    events::{self, Context},
+};
 use common::packets::*;
 use common::ConnectionId;
 
@@ -175,22 +178,173 @@ pub enum Receive {
 #[error("This connection is disconnected and is not running")]
 pub struct Disconnected;
 
-#[derive(Clone)]
-pub struct Connection {
-    read: Arc<Mutex<BufReader<OwnedReadHalf>>>,
-    read_rx: Option<Arc<Mutex<Receiver<Receive>>>>,
+struct ConnectionState {
+    read: Mutex<BufReader<OwnedReadHalf>>,
 
-    write: Arc<Mutex<BufWriter<OwnedWriteHalf>>>,
-    write_tx: Option<Arc<Mutex<Sender<PacketBuffer>>>>,
+    write: Mutex<BufWriter<OwnedWriteHalf>>,
+    write_tx: Mutex<Sender<PacketBuffer>>,
 
-    running: Arc<AtomicBool>,
+    running: AtomicBool,
 
     compressor: Compressor,
     id: ConnectionId,
 }
 
+impl ConnectionState {
+    fn running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Clone)]
+pub struct Connection {
+    state: Arc<ConnectionState>,
+    dispatcher: Arc<Dispatcher<Context>>,
+}
+
 impl Connection {
-    pub fn new(stream: TcpStream, compression: Compression) -> Self {
+    fn start_reader(conn: Self, ctx: Context) {
+        tokio::spawn(async move {
+            while conn.running() {
+                let mut guard = conn.state.read.lock().await;
+                let buffer = match conn.state.compressor.read(guard.deref_mut()).await {
+                    Ok(raw) => raw,
+                    Err(error) => {
+                        log::warn!("Error reading packet from {}: {error}", conn.state.id);
+                        if let Err(error) = conn.terminate().await {
+                            log::warn!("An error occurred while attempting to terminate connection {} due to a different previous error: {error}", conn.id())
+                        }
+                        return;
+                    }
+                };
+
+                log::debug!(
+                    "Received packet with ID {} from connection {}",
+                    buffer.id(),
+                    conn.id()
+                );
+
+                let ev_conn = conn.clone();
+
+                // TODO: turn this into a macro to keep it DRY
+                let result = match buffer.id() {
+                    GenerateRegion::ID => match GenerateRegion::from_bincode(&buffer) {
+                        Ok(packet) => {
+                            let sent = conn
+                                .dispatcher
+                                .broadcast_event(
+                                    ctx.clone(),
+                                    events::ReceivedPacket {
+                                        connection: ev_conn,
+                                        packet: Arc::new(packet),
+                                    },
+                                )
+                                .await;
+                            Ok(sent)
+                        }
+                        Err(error) => Err(error),
+                    },
+
+                    GenerateBrush::ID => match GenerateBrush::from_bincode(&buffer) {
+                        Ok(packet) => {
+                            let sent = conn
+                                .dispatcher
+                                .broadcast_event(
+                                    ctx.clone(),
+                                    events::ReceivedPacket {
+                                        connection: ev_conn,
+                                        packet: Arc::new(packet),
+                                    },
+                                )
+                                .await;
+                            Ok(sent)
+                        }
+                        Err(error) => Err(error),
+                    },
+
+                    ListGenerators::ID => match ListGenerators::from_bincode(&buffer) {
+                        Ok(packet) => {
+                            let sent = conn
+                                .dispatcher
+                                .broadcast_event(
+                                    ctx.clone(),
+                                    events::ReceivedPacket {
+                                        connection: ev_conn,
+                                        packet: Arc::new(packet),
+                                    },
+                                )
+                                .await;
+                            Ok(sent)
+                        }
+                        Err(error) => Err(error),
+                    },
+
+                    ProtocolError::ID => match ProtocolError::from_bincode(&buffer) {
+                        Ok(packet) => {
+                            let sent = conn
+                                .dispatcher
+                                .broadcast_event(
+                                    ctx.clone(),
+                                    events::ReceivedPacket {
+                                        connection: ev_conn,
+                                        packet: Arc::new(packet),
+                                    },
+                                )
+                                .await;
+                            Ok(sent)
+                        }
+                        Err(error) => Err(error),
+                    },
+
+                    _ => {
+                        log::error!(
+                            "Invalid packet ID from connection {}: {}",
+                            conn.state.id,
+                            buffer.id()
+                        );
+                        Ok(false)
+                    }
+                };
+
+                match result {
+                    Ok(sent) => {
+                        if !sent {
+                            log::warn!("Packet from connection {} was decoded, but the event dispatcher did not have a listener to handle it.", conn.id())
+                        }
+                    }
+                    Err(error) => log::error!(
+                        "Error when decoding packet from connection {}: {error}",
+                        conn.id()
+                    ),
+                }
+            }
+        });
+    }
+
+    fn start_writer(conn: Self, mut write_rx: Receiver<PacketBuffer>) {
+        tokio::spawn(async move {
+            while conn.running() {
+                if let Ok(raw) = write_rx.try_recv() {
+                    if conn
+                        .state
+                        .compressor
+                        .write(&raw, conn.state.write.lock().await.deref_mut())
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn start(
+        stream: TcpStream,
+        compression: Compression,
+        dispatcher: Arc<Dispatcher<Context>>,
+        context: Context,
+    ) -> Self {
         let addr = stream.peer_addr().unwrap();
         let (read, write) = stream.into_split();
 
@@ -201,19 +355,33 @@ impl Connection {
             }
         };
 
-        Self {
-            read: Mutex::new(BufReader::new(read)).into(),
-            read_rx: None,
-            write: Mutex::new(BufWriter::new(write)).into(),
-            write_tx: None,
-            running: Arc::new(false.into()),
+        let (write_tx, write_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
+
+        let state = Arc::new(ConnectionState {
+            read: Mutex::new(BufReader::new(read)),
+
+            write: Mutex::new(BufWriter::new(write)),
+            write_tx: Mutex::new(write_tx),
+
             compressor: Compressor::new(compression),
             id,
-        }
+
+            running: true.into(),
+        });
+
+        let conn = Self { state, dispatcher };
+
+        log::info!("Starting READER for connection {}", conn.state.id);
+        Self::start_reader(conn.clone(), context);
+
+        log::info!("Starting WRITER for connection {}", conn.state.id);
+        Self::start_writer(conn.clone(), write_rx);
+
+        conn
     }
 
     pub fn id(&self) -> ConnectionId {
-        self.id
+        self.state.id
     }
 
     pub async fn send_packet<P: Packet>(&self, packet: &P) -> anyhow::Result<()> {
@@ -223,90 +391,13 @@ impl Connection {
 
         let raw = packet.to_bincode()?;
 
-        self.write_tx
-            .as_ref()
-            .unwrap()
-            .lock()
-            .await
-            .send(raw)
-            .await?;
+        self.state.write_tx.lock().await.send(raw).await?;
 
         Ok(())
     }
 
-    pub async fn incoming(&self) -> Result<ConnectionIncoming<'_>, Disconnected> {
-        if self.running() {
-            Ok(ConnectionIncoming {
-                guard: self.read_rx.as_ref().unwrap().lock().await,
-            })
-        } else {
-            Err(Disconnected)
-        }
-    }
-
     pub fn running(&self) -> bool {
-        self.running.load(Ordering::SeqCst)
-    }
-
-    pub fn run(&mut self) {
-        assert!(
-            !self.running.load(Ordering::SeqCst),
-            "cannot run connection twice!"
-        );
-
-        log::info!("Running connection {}", self.id());
-        self.running.store(true, Ordering::SeqCst);
-
-        let (read_tx, read_rx) = tokio::sync::mpsc::channel::<Receive>(128);
-        let (write_tx, mut write_rx) = tokio::sync::mpsc::channel::<PacketBuffer>(128);
-
-        self.read_rx = Some(Arc::new(Mutex::new(read_rx)));
-        self.write_tx = Some(Arc::new(Mutex::new(write_tx)));
-
-        // Reader
-        let reader = self.read.clone();
-        let compressor = self.compressor;
-        let running = self.running.clone();
-        let id = self.id();
-
-        log::info!("Starting READER for connection {}", self.id());
-        tokio::spawn(async move {
-            while running.load(Ordering::SeqCst) {
-                for _ in 0..100 {
-                    let mut guard = reader.lock().await;
-                    match compressor.read(guard.deref_mut()).await {
-                        Ok(raw) => read_tx.send(Receive::Packet(raw)).await.unwrap(),
-                        Err(error) => {
-                            log::warn!("error reading packet from {id}: {error}");
-                            read_tx.send(Receive::Disconnect).await.unwrap();
-                            return;
-                        }
-                    }
-                }
-            }
-        });
-
-        // Writer
-        let writer = self.write.clone();
-        let compressor = self.compressor;
-        let running = self.running.clone();
-
-        log::info!("Starting WRITER for connection {}", self.id());
-        tokio::spawn(async move {
-            while running.load(Ordering::SeqCst) {
-                for _ in 0..100 {
-                    if let Ok(raw) = write_rx.try_recv() {
-                        if compressor
-                            .write(&raw, writer.lock().await.deref_mut())
-                            .await
-                            .is_err()
-                        {
-                            return;
-                        }
-                    }
-                }
-            }
-        });
+        self.state.running.load(Ordering::SeqCst)
     }
 
     pub async fn terminate(&self) -> anyhow::Result<()> {
@@ -316,14 +407,15 @@ impl Connection {
             details: "Server stopped".to_string(),
         });
 
-        self.compressor
+        self.state
+            .compressor
             .write(
                 &packet.to_bincode().unwrap(),
-                self.write.lock().await.deref_mut(),
+                self.state.write.lock().await.deref_mut(),
             )
             .await?;
 
-        self.running.store(false, Ordering::SeqCst);
+        self.state.running.store(false, Ordering::SeqCst);
         Ok(())
     }
 
@@ -341,143 +433,85 @@ impl Connection {
 impl std::fmt::Debug for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Connection")
-            .field("address", &self.id)
-            .field("compression", &self.compressor.level)
-            .field("running", &self.running.load(Ordering::SeqCst))
+            .field("address", &self.state.id)
+            .field("compression", &self.state.compressor.level)
+            .field("running", &self.state.running.load(Ordering::SeqCst))
             .finish()
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct Params {
-    pub(crate) addr: SocketAddrV4,
-    pub(crate) compression: Compression,
+#[derive(te::Error, Debug)]
+#[error("Listener is not running")]
+pub struct ListenerNotRunning;
+
+pub struct Listener {
+    inner: Mutex<Option<TcpListener>>,
+    dispatcher: Arc<Dispatcher<Context>>,
+    running: AtomicBool,
 }
 
-impl From<ServerParams> for Params {
-    fn from(p: ServerParams) -> Self {
+impl Listener {
+    pub fn new(dispatcher: Arc<Dispatcher<Context>>) -> Self {
         Self {
-            addr: p.addr,
-            compression: p.compression,
-        }
-    }
-}
-
-// FIXME: The networker is currently just an awkward middle layer that does nothing useful other than add overhead.
-//  Work on removing it entirely and move all the functionality in it to Connections themselves.
-#[derive(Clone)]
-pub struct Networker {
-    params: Params,
-    listener: Option<Arc<Mutex<TcpListener>>>,
-    connections: Shared<ConnectionMap>,
-    running: Arc<AtomicBool>,
-}
-
-impl Networker {
-    pub fn new(params: Params) -> Self {
-        Self {
-            params,
-            listener: None,
-            connections: Arc::new(RwLock::new(HashMap::new())),
-            running: Arc::new(false.into()),
+            inner: Mutex::new(None),
+            dispatcher,
+            running: false.into(),
         }
     }
 
-    pub async fn run(&mut self) -> anyhow::Result<()> {
-        assert!(
-            !self.running.load(Ordering::SeqCst),
-            "cannot start networker twice!"
-        );
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::SeqCst);
+    }
+
+    pub async fn start(&self, address: SocketAddrV4) -> anyhow::Result<()> {
+        *self.inner.lock().await = Some(TcpListener::bind(address).await?);
 
         self.running.store(true, Ordering::SeqCst);
-
-        let listener = Arc::new(Mutex::new(TcpListener::bind(self.params.addr).await?));
-        self.listener = Some(listener.clone());
-
-        let connections = self.connections.clone();
-        let compression = self.params.compression;
-        let running = self.running.clone();
-
-        tokio::spawn(async move {
-            while running.load(Ordering::SeqCst) {
-                let (incoming, _) = listener.lock().await.accept().await.unwrap();
-
-                let mut conn = Connection::new(incoming, compression);
-                let id = conn.id();
-
-                log::info!("Accepted connection from {}", id);
-
-                conn.run();
-
-                log::info!("Adding {} to connection registry", id);
-                connections.write().await.insert(id, conn);
-
-                log::info!("Done handling connection {}", id);
-            }
-        });
-
         Ok(())
     }
 
-    pub async fn stop(self) -> anyhow::Result<()> {
-        log::info!("Stopping networker...");
-
-        self.running.store(false, Ordering::SeqCst);
-
-        for conn in self.connections.read().await.values() {
-            if let Err(error) = conn.terminate().await {
-                log::warn!("Error when terminating connection {conn:?}: {error}");
-            }
-        }
-
-        Ok(())
+    pub fn running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
     }
 
-    pub async fn incoming(&self) -> Incoming {
-        let guard = self.connections.read().await;
-        let mut packets = Vec::new();
-        let mut disconnected = Vec::new();
+    pub async fn accept(&self) -> anyhow::Result<(TcpStream, SocketAddr)> {
+        if !self.running() {
+            Err(ListenerNotRunning.into())
+        } else {
+            let guard = self.inner.lock().await;
 
-        for (id, conn) in guard.iter() {
-            if let Ok(incoming) = conn.incoming().await {
-                for packet in incoming {
-                    match packet {
-                        Receive::Packet(buf) => {
-                            packets.push((conn.clone(), packets::parse_dyn(&buf)))
-                        }
-                        Receive::Disconnect => disconnected.push(*id),
-                    }
-                }
+            match guard.as_ref() {
+                Some(inner) => Ok(inner.accept().await?),
+                None => Err(ListenerNotRunning.into()),
             }
         }
-
-        if !disconnected.is_empty() {
-            log::info!("Removing disconnected connections from registry...");
-
-            drop(guard);
-            let mut guard = self.connections.write().await;
-            for id in disconnected {
-                guard.remove(&id);
-                log::info!("Removed connection {id} from registry.")
-            }
-        }
-
-        Incoming(packets.into_iter())
-    }
-
-    #[inline]
-    pub async fn connection(&self, id: ConnectionId) -> Option<Connection> {
-        self.connections.read().await.get(&id).cloned()
     }
 }
 
-pub struct Incoming(std::vec::IntoIter<(Connection, anyhow::Result<DynPacket>)>);
+pub struct ConnectionRegistry {
+    inner: RwLock<HashMap<ConnectionId, Connection>>,
+}
 
-impl Iterator for Incoming {
-    type Item = (Connection, anyhow::Result<DynPacket>);
+impl ConnectionRegistry {
+    pub fn new() -> Self {
+        Self {
+            inner: RwLock::new(Default::default()),
+        }
+    }
 
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0.next()
+    pub async fn get_connection(&self, id: &ConnectionId) -> Option<Connection> {
+        self.inner.read().await.get(id).cloned()
+    }
+
+    pub async fn add_connection(&self, connection: Connection) {
+        self.inner.write().await.insert(connection.id(), connection);
+    }
+
+    pub async fn disconnect_all(&self) -> anyhow::Result<()> {
+        for conn in self.inner.read().await.values() {
+            conn.terminate().await?;
+        }
+
+        Ok(())
     }
 }
